@@ -1,0 +1,22 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "worker": {
+      "mode": "primary",
+      "description": "Non-interactive executor for tasks delegated from Claude Code via `opencode run`. Permissive edit/bash so it can work unattended; dangerous operations stay denied.",
+      "permission": {
+        "edit": "allow",
+        "external_directory": "allow",
+        "bash": {
+          "*": "allow",
+          "sudo *": "deny",
+          "ssh *": "deny",
+          "scp *": "deny",
+          "git push *": "deny",
+          "npm publish *": "deny",
+          "rm -rf /*": "deny"
+        }
+      }
+    }
+  }
+}
