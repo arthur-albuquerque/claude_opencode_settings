@@ -14,7 +14,7 @@ token spend (writing code) happens on a flat-rate $12/5h worker plan instead of 
 | File | Installs to | Purpose |
 |------|-------------|---------|
 | `CLAUDE.md` | `~/.claude/CLAUDE.md` | The whole system prompt: delegation rules, model table, budget pacing, auto-resume |
-| `scripts/opencode-go-usage.py` | `~/.claude/scripts/opencode-go-usage.py` | OpenCode Go budget check (authoritative gateway probe + local burn-rate trend) |
+| `scripts/opencode-go-usage.py` | `~/.claude/scripts/opencode-go-usage.py` | OpenCode Go budget check (authoritative gateway blocked-state probe) |
 | `opencode.worker-agent.example.json` | merge into `~/.config/opencode/opencode.json` | The `worker` agent definition that lets `opencode run` edit files non-interactively |
 
 ## Features
@@ -35,8 +35,9 @@ token spend (writing code) happens on a flat-rate $12/5h worker plan instead of 
 - **Budget-aware pacing.** Two budgets, two checks: `ccusage` for the Claude window,
   `opencode-go-usage.py` for the worker plan. The script probes the Go gateway with a 1-token
   request (blocked requests are rejected before billing, so probing is free) and reports
-  blocked-state + reset time authoritatively, with a local SQLite burn-rate trend for pacing.
-  Rules cover wave sizing, tier downshifting near the limit, and never silently dropping work.
+  blocked-state + reset time authoritatively — the only budget signal (there is no key-based
+  percent-used API, so the doctrine runs at full tier until the gateway blocks).
+  Rules cover wave sizing and never silently dropping work.
 - **Auto-resume loop.** When a long autonomous job pauses near a usage limit, the session
   schedules its own wakeups (chained hourly `ScheduleWakeup` calls, since resets can be hours
   out), re-checks both budgets on each wake with a minimal two-command turn, and resumes the
@@ -61,9 +62,9 @@ token spend (writing code) happens on a flat-rate $12/5h worker plan instead of 
 
 - The model table (names, pricing, request quotas) reflects OpenCode Go's catalog as of
   **July 2026**; re-rank when the catalog changes.
-- Budget figures assume the $12/5h ($30/wk, $60/mo) Go plan — adjust `LIMITS_USD` in the script
-  and the numbers in `CLAUDE.md` if yours differs.
+- Budget figures assume the $12/5h ($30/wk, $60/mo) Go plan — adjust the numbers in `CLAUDE.md`
+  and the script's docstring if yours differs.
 - The auto-resume loop only works while the Claude Code session stays open on an awake machine
   (`caffeinate -is` for overnight runs on macOS).
-- `opencode-go-usage.py`'s local trend reads opencode's SQLite log on the current machine only;
-  the gateway probe is the ground truth.
+- `opencode-go-usage.py` reports only the authoritative gateway blocked-state (there is no
+  key-based percent-used API for OpenCode Go); it is the sole budget signal.

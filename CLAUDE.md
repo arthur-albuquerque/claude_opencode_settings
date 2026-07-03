@@ -88,12 +88,11 @@ After every worker run:
 Two budgets, two checks:
 
 - **Claude (coordinator):** `npx -y ccusage@latest blocks --active --json`. Harness limit warnings are authoritative; ccusage is the burn-rate trend. ≥95% of a window or any warning → stop starting new work.
-- **OpenCode Go (workers, $12/5h $30/wk $60/mo):** `python3 ~/.claude/scripts/opencode-go-usage.py`. `gateway` is authoritative (exit 2 = blocked, with `window` + `reset_in_sec`; probing is free); `local_trend` is a directional overestimate — pace with it, never gate on it. Details in the script's docstring.
+- **OpenCode Go (workers, $12/5h $30/wk $60/mo):** `python3 ~/.claude/scripts/opencode-go-usage.py`. The `gateway` probe is authoritative and the only budget signal (exit 2 = blocked, with `window` + `reset_in_sec`; exit 0 = clear; probing is free). There is no proactive percent-used signal — run at full tier until the gateway blocks. Details in the script's docstring.
 
 Rules for every session that delegates:
 - A wave = ≤3 parallel opencode workers on non-overlapping files — never Claude subagents.
 - Workers blocked (probe, or `GoUsageLimitError` in a worker's output — same signal): all Go models block together, downshifting won't help. If the 5h window tripped, wait for `reset_in_sec` or do the typing myself; if weekly/monthly tripped (resets days out), do the typing myself. Tell me either way.
-- Not blocked but 5h `local_trend` ≳80%: downshift tier (kimi/glm → deepseek-v4-pro → flash); if the cheap tier can't pass review, stop and report rather than ship junk.
 - Never silently drop remaining work over budget; report it with the triggering window + numbers.
 
 Extra rules for long autonomous jobs (multi-wave delegation, `/loop`, overnight runs):

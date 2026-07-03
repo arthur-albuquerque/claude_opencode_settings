@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""OpenCode Go budget check: authoritative blocked-state probe + local burn-rate trend.
+"""OpenCode Go budget check: authoritative blocked-state probe.
 
 There is NO key-based "percent used" API for OpenCode Go (usage percent exists only behind
 the cookie-auth web console). What IS authoritative and long-lived, straight from the
@@ -11,21 +11,16 @@ gateway source (packages/console/app/src/routes/zen/util/handler.ts):
     {error: {type: "GoUsageLimitError", ...}, metadata: {limitName: "5 hour"|"weekly"|"monthly"}}.
   - A blocked request is rejected before billing, so probing while blocked costs nothing.
 
-So this script:
-  1. PROBE (authoritative): sends a 1-token request to the cheapest model using the API key
-     read live from ~/.local/share/opencode/auth.json (survives /connect key rotation).
-     -> gateway.blocked = true/false; when blocked: window name + reset_in_sec.
-  2. TREND (estimate): sums nominal cost from the local opencode SQLite log over 5h/7d/30d
-     lookbacks. This is a this-machine-only trend indicator whose absolute percentages are
-     known to overstate vs. server metering — use it for pacing/downshifting decisions only.
+So this script PROBES (authoritative): sends a 1-token request to the cheapest model using the
+API key read live from ~/.local/share/opencode/auth.json (survives /connect key rotation).
+-> gateway.blocked = true/false; when blocked: window name + reset_in_sec.
 
-Output: one JSON object. Trust `gateway`; treat `local_trend` as directional.
+Output: one JSON object; `gateway` is the ground truth.
 Exit 0 = not blocked, 2 = blocked, 1 = probe failed (see warnings).
 """
 
 import json
 import re
-import sqlite3
 import sys
 import time
 import urllib.error
@@ -35,9 +30,6 @@ from pathlib import Path
 GATEWAY = "https://opencode.ai/zen/go/v1"
 PROBE_MODEL = "deepseek-v4-flash"  # cheapest; auto-falls-back to the models list if gone
 AUTH_JSON = Path.home() / ".local/share/opencode/auth.json"
-DB_PATH = Path.home() / ".local/share/opencode/opencode.db"
-LIMITS_USD = {"5h": 12.0, "weekly": 30.0, "monthly": 60.0}
-LOOKBACK_SEC = {"5h": 5 * 3600, "weekly": 7 * 86400, "monthly": 30 * 86400}
 
 
 def api_key(warnings):
@@ -125,53 +117,12 @@ def probe(key, warnings):
     return None
 
 
-def local_trend(warnings):
-    """This-machine burn-rate estimate. Directional only — overstates vs. server metering."""
-    if not DB_PATH.exists():
-        warnings.append(f"local opencode db not found at {DB_PATH}")
-        return None
-    try:
-        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
-        now_ms = int(time.time() * 1000)
-        windows = {}
-        for win, sec in LOOKBACK_SEC.items():
-            rows = conn.execute(
-                """SELECT json_extract(data,'$.modelID'),
-                          COUNT(*), COALESCE(SUM(json_extract(data,'$.cost')),0)
-                   FROM message
-                   WHERE json_extract(data,'$.role')='assistant'
-                     AND json_extract(data,'$.providerID')='opencode-go'
-                     AND time_created >= ?
-                   GROUP BY 1""",
-                (now_ms - sec * 1000,),
-            ).fetchall()
-            cost = sum(r[2] for r in rows)
-            windows[win] = {
-                "est_percent": round(100 * cost / LIMITS_USD[win], 1),
-                "est_cost_usd": round(cost, 2),
-                "limit_usd": LIMITS_USD[win],
-                "requests": sum(r[1] for r in rows),
-                "by_model": {r[0]: {"requests": r[1], "cost_usd": round(r[2], 2)} for r in rows},
-            }
-        conn.close()
-        windows["note"] = (
-            "rolling lookbacks at list prices — the provider uses fixed billing cycles, "
-            "so weekly/monthly overstate (can read >100% while the gateway is green); "
-            "directional pacing signal only, `gateway` is the ground truth"
-        )
-        return windows
-    except sqlite3.Error as e:
-        warnings.append(f"local db read failed: {e}")
-        return None
-
-
 def main():
     warnings = []
     key = api_key(warnings)
     gateway = probe(key, warnings) if key else None
     out = {
         "gateway": gateway,  # authoritative: blocked yes/no (+ window/reset when blocked)
-        "local_trend": local_trend(warnings),  # directional estimate, this machine only
         "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "warnings": warnings,
     }
