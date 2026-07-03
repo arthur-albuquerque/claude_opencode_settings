@@ -49,7 +49,7 @@ opencode run --pure --agent worker -m opencode-go/<model> "<self-contained promp
 
 - `--agent worker` is a preconfigured executor in `~/.config/opencode/opencode.json` with non-interactive file-edit and bash permissions (plain `opencode run` auto-rejects edits — never omit it). Dangerous ops (sudo, ssh, git push, npm publish) stay denied; you handle git yourself.
 - `--pure` skips external plugins (oh-my-openagent) so runs are clean and fast. Keep it.
-- Give Bash a generous timeout (600000 ms) — worker runs take minutes. For long tasks or **parallel independent tasks**, use `run_in_background: true` Bash calls; review each result as it lands. Don't run two workers over overlapping files.
+- Launch **every** worker with `run_in_background: true` and **no `timeout`** — worker runs take minutes and foreground Bash caps at 10 min, which kills a run mid-edit. The harness notifies you when each run exits; review each result as it lands. If a worker looks hung, inspect and kill it deliberately — never rely on a timer to reap it. Don't run two workers over overlapping files.
 - **Iterating on a worker's output:** don't re-send full context. Capture the session at launch with `--format json` (first event has `sessionID`), or for a single sequential worker just use `-c` (continue latest session). Then: `opencode run --pure --agent worker -s <sessionID> "Review failed because X. Fix by Y."`
 - `--variant high|max` raises reasoning effort on models that support it (e.g. kimi-k2.7-code) — use for the hard tier only.
 - For big multi-task jobs wanting isolated worktrees + orchestration, `/ultraswarm` exists — but restrict its workers to opencode models.
