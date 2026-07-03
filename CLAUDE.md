@@ -115,7 +115,3 @@ Caveats that make this work:
 - Wakeups fire only while this session is open on an awake machine. Before an overnight run, remind me once: keep the session open and run `caffeinate -is` (or plug in and disable sleep).
 - Each wake beyond 5 min is a full-context cache miss — wake at min(1h, reset), never poll faster to "check early".
 - `CronCreate`/`/schedule` start fresh cloud agents with no session context — they are not a substitute for resuming in-session work.
-
-## Visualization default
-
-When code that draws a plot is written or delegated — especially R/ggplot2 — consult the `data-viz` skill first and apply its defaults. When delegating plotting code, embed the relevant defaults verbatim in the worker prompt (workers can't read the skill). Don't wait to be asked for "nice" charts.

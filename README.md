@@ -42,8 +42,6 @@ token spend (writing code) happens on a flat-rate $12/5h worker plan instead of 
   schedules its own wakeups (chained hourly `ScheduleWakeup` calls, since resets can be hours
   out), re-checks both budgets on each wake with a minimal two-command turn, and resumes the
   remaining plan the moment a window clears — no human restart needed.
-- **Visualization default.** Plot-drawing code (especially R/ggplot2) is routed through a
-  data-viz skill's defaults, with the relevant rules embedded verbatim in worker prompts.
 
 ## Setup
 
