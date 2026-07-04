@@ -108,7 +108,21 @@ token spend (writing code) happens on a flat-rate $12/5h worker plan instead of 
 6. Merge the `agent.worker` block from `opencode.worker-agent.example.json` into your
    `~/.config/opencode/opencode.json`. Without it, `opencode run` auto-rejects file edits and
    delegation silently fails.
-7. Start a Claude Code session anywhere — the global `CLAUDE.md` applies to every project.
+7. **Disable opencode's Claude Code compatibility.** OpenCode loads `~/.claude/CLAUDE.md` as a
+   fallback instruction file by default. Because that file is written for Claude Code (the
+   coordinator), letting opencode read it causes opencode sessions to inherit coordinator rules
+   they should not execute, and breaks `opencode run` / direct opencode usage. Add this to your
+   shell profile:
+
+   ```bash
+   echo 'export OPENCODE_DISABLE_CLAUDE_CODE=1' >> ~/.zshrc
+   source ~/.zshrc
+   ```
+
+   There is no equivalent key in `opencode.json`; this is the only supported mechanism. If you
+   want to keep `.claude/skills` available to opencode but only suppress the `CLAUDE.md` prompt
+   fallback, use `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1` instead.
+8. Start a Claude Code session anywhere — the global `CLAUDE.md` applies to every project.
 
 ## Caveats
 
