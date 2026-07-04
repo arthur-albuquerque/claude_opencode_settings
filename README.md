@@ -14,6 +14,8 @@ token spend (writing code) happens on a flat-rate $12/5h worker plan instead of 
 | File | Installs to | Purpose |
 |------|-------------|---------|
 | `CLAUDE.md` | `~/.claude/CLAUDE.md` | The whole system prompt: delegation rules, model table, budget pacing, auto-resume |
+| `statusline-command.sh` | `~/.claude/statusline-command.sh` | Claude Code status line script that persists `~/.claude/usage-snapshot.json` |
+| `hooks/usage-warning.sh` | `~/.claude/hooks/usage-warning.sh` | Hook that auto-injects a budget warning into the agent's context at ≥90% / ≥95% of a Claude usage window |
 | `scripts/opencode-go-usage.py` | `~/.claude/scripts/opencode-go-usage.py` | OpenCode Go budget check (authoritative gateway blocked-state probe) |
 | `opencode.worker-agent.example.json` | merge into `~/.config/opencode/opencode.json` | The `worker` agent definition that lets `opencode run` edit files non-interactively |
 
@@ -32,12 +34,19 @@ token spend (writing code) happens on a flat-rate $12/5h worker plan instead of 
 - **Non-negotiable QA loop.** After every worker run: read the actual `git diff`, re-run the
   verification command yourself, re-delegate up the ladder or fix residuals directly. The
   coordinator owns commits and everything user-visible.
-- **Budget-aware pacing.** Two budgets, two checks: `ccusage` for the Claude window,
-  `opencode-go-usage.py` for the worker plan. The script probes the Go gateway with a 1-token
-  request (blocked requests are rejected before billing, so probing is free) and reports
-  blocked-state + reset time authoritatively — the only budget signal (there is no key-based
-  percent-used API, so the doctrine runs at full tier until the gateway blocks).
-  Rules cover wave sizing and never silently dropping work.
+- **Budget-aware pacing.** Two budgets, two independent signals. The Claude-window signal is the
+  `hooks/usage-warning.sh` hook (a required install): it reads `~/.claude/usage-snapshot.json` — a
+  machine-readable snapshot written by `statusline-command.sh` on every status-line render using
+  the harness's own accounting — and *pushes* the warning straight into the agent's context every
+  tool-using turn once a window crosses 90% (heads-up) / 95% (stop directive). The agent never
+  polls; the warning comes to it, so the pause no longer depends on the agent remembering to
+  check. A proactively-armed dead-man's-switch `ScheduleWakeup` backstops the one case the hook
+  can't catch — a hard trip mid-turn on a lagging snapshot. The worker
+  plan is checked with `opencode-go-usage.py`, which probes the Go gateway with a 1-token request
+  (blocked requests are rejected before billing, so probing is free) and reports blocked-state +
+  reset time authoritatively — the only budget signal (there is no key-based percent-used API, so
+  the doctrine runs at full tier until the gateway blocks). Rules cover wave sizing and never
+  silently dropping work.
 - **Auto-resume loop.** When a long autonomous job pauses near a usage limit, the session
   schedules its own wakeups (chained hourly `ScheduleWakeup` calls, since resets can be hours
   out), re-checks both budgets on each wake with a minimal two-command turn, and resumes the
@@ -47,14 +56,59 @@ token spend (writing code) happens on a flat-rate $12/5h worker plan instead of 
 
 1. **Prerequisites:** [Claude Code](https://claude.com/claude-code), the
    [opencode CLI](https://opencode.ai) with an OpenCode Go subscription (run `/connect` inside
-   opencode once so `~/.local/share/opencode/auth.json` holds your key), Node (for
-   `npx ccusage`), and Python 3.
+   opencode once so `~/.local/share/opencode/auth.json` holds your key), Python 3, and `jq`.
 2. Copy `CLAUDE.md` to `~/.claude/CLAUDE.md` (or append to yours).
-3. Copy `scripts/opencode-go-usage.py` to `~/.claude/scripts/`.
-4. Merge the `agent.worker` block from `opencode.worker-agent.example.json` into your
+3. Copy `statusline-command.sh` to `~/.claude/statusline-command.sh` and wire it into Claude Code.
+   The easiest way is to run this inside Claude Code (it will update your `~/.claude/settings.json`):
+
+   ```text
+   /statusline use the existing executable script at ~/.claude/statusline-command.sh as the status-line command; it reads JSON from stdin and prints the context-window token count, 5-hour usage percentage with time remaining, and weekly usage percentage with reset time
+   ```
+
+   Or add it manually to `~/.claude/settings.json`:
+
+   ```json
+   {
+     "statusLine": {
+       "type": "command",
+       "command": "~/.claude/statusline-command.sh"
+     }
+   }
+   ```
+
+   The script runs after each assistant message and writes `~/.claude/usage-snapshot.json`, which
+   `CLAUDE.md` reads as the authoritative Claude-window budget signal.
+4. **Install the usage-warning hook — this is the Claude-window budget signal, not an add-on.**
+   Copy `hooks/usage-warning.sh` to `~/.claude/hooks/usage-warning.sh`, `chmod +x` it, then wire it
+   into `~/.claude/settings.json` on `PostToolUse` (fires every agentic turn, including autonomous
+   `/loop` and `ScheduleWakeup` wakes) and `SessionStart` (fires on resume). If those events already
+   have hooks, **append** this entry to their `hooks` array rather than replacing it:
+
+   ```json
+   {
+     "hooks": {
+       "PostToolUse": [
+         { "matcher": "*", "hooks": [
+           { "type": "command", "command": "~/.claude/hooks/usage-warning.sh", "timeout": 5 }
+         ]}
+       ],
+       "SessionStart": [
+         { "matcher": "*", "hooks": [
+           { "type": "command", "command": "~/.claude/hooks/usage-warning.sh", "timeout": 5 }
+         ]}
+       ]
+     }
+   }
+   ```
+
+   The hook is silent below 90%; at ≥90% it injects a heads-up and at ≥95% a stop directive that
+   quotes the pause procedure. It reads only the snapshot (no API calls). Test it before wiring:
+   `printf '{"hook_event_name":"PostToolUse"}' | CLAUDE_USAGE_SNAPSHOT=<fixture.json> ~/.claude/hooks/usage-warning.sh`.
+5. Copy `scripts/opencode-go-usage.py` to `~/.claude/scripts/`.
+6. Merge the `agent.worker` block from `opencode.worker-agent.example.json` into your
    `~/.config/opencode/opencode.json`. Without it, `opencode run` auto-rejects file edits and
    delegation silently fails.
-5. Start a Claude Code session anywhere — the global `CLAUDE.md` applies to every project.
+7. Start a Claude Code session anywhere — the global `CLAUDE.md` applies to every project.
 
 ## Caveats
 
@@ -64,5 +118,9 @@ token spend (writing code) happens on a flat-rate $12/5h worker plan instead of 
   and the script's docstring if yours differs.
 - The auto-resume loop only works while the Claude Code session stays open on an awake machine
   (`caffeinate -is` for overnight runs on macOS).
-- `opencode-go-usage.py` reports only the authoritative gateway blocked-state (there is no
-  key-based percent-used API for OpenCode Go); it is the sole budget signal.
+- The Claude-window signal is `usage-warning.sh` pushing the warning into context; it reads
+  `usage-snapshot.json`, which `statusline-command.sh` writes only when the status line renders and
+  the hook only fires on tool-using turns, so a single big turn can hard-trip before any warning —
+  the dead-man's-switch `ScheduleWakeup` is the backstop for that. `opencode-go-usage.py` reports
+  only the authoritative gateway blocked-state (there is no key-based percent-used API for OpenCode
+  Go); it is the sole worker-budget signal.
