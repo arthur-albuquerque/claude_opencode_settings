@@ -1,5 +1,13 @@
 # Claude Code × OpenCode Go — coordinator/worker settings
 
+> In short, this setup turns Claude Code into a budget-aware coordinator that delegates coding work
+> to cheap OpenCode Go workers, verifies every worker result before shipping it, and monitors live
+> usage across both services so it pauses before a budget window is exhausted and automatically
+> resumes once it resets.
+>
+> The main goal is to let Claude run long coding sessions by itself with as little human
+> intervention as possible.
+
 Global Claude Code configuration for people who run **Claude Code** (Fable 5 / Opus) alongside an
 **[OpenCode Go](https://opencode.ai)** subscription. It turns Claude into a *coordinator* that spends
 its expensive tokens on judgment — diagnosis, task decomposition, code review, verification — while
@@ -8,14 +16,6 @@ the same session.
 
 The goal: long, productive Claude sessions that don't burn through usage limits, because the bulk
 token spend (writing code) happens on a flat-rate $12/5h worker plan instead of on Claude.
-
-> In short, this setup turns Claude Code into a budget-aware coordinator that delegates coding work
-> to cheap OpenCode Go workers, verifies every worker result before shipping it, and monitors live
-> usage across both services so it pauses before a budget window is exhausted and automatically
-> resumes once it resets.
->
-> The main goal is to let Claude run long coding sessions by itself with as little human
-> intervention as possible.
 
 ## What's in here
 
