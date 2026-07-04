@@ -9,6 +9,14 @@ the same session.
 The goal: long, productive Claude sessions that don't burn through usage limits, because the bulk
 token spend (writing code) happens on a flat-rate $12/5h worker plan instead of on Claude.
 
+> In short, this setup turns Claude Code into a budget-aware coordinator that delegates coding work
+> to cheap OpenCode Go workers, verifies every worker result before shipping it, and monitors live
+> usage across both services so it pauses before a budget window is exhausted and automatically
+> resumes once it resets.
+>
+> The main goal is to let Claude run long coding sessions by itself with as little human
+> intervention as possible.
+
 ## What's in here
 
 | File | Installs to | Purpose |
@@ -51,6 +59,9 @@ token spend (writing code) happens on a flat-rate $12/5h worker plan instead of 
   schedules its own wakeups (chained hourly `ScheduleWakeup` calls, since resets can be hours
   out), re-checks both budgets on each wake with a minimal two-command turn, and resumes the
   remaining plan the moment a window clears — no human restart needed.
+- **Built for Claude's auto mode.** The coordinator/worker split, built-in verification, and
+  auto-resume loop are designed so Claude can drive long coding sessions with minimal human input;
+  auto mode is the ideal way to use this setup.
 
 ## Setup
 
