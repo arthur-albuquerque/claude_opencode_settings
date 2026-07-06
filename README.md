@@ -32,11 +32,22 @@ branch **splits the framework by scope** so nothing is forced on a session that 
 | **Claude-usage-limit pacing** — dead-man's switch, auto-resume loop | In `CLAUDE.md` | In `CLAUDE.md` — stays always-on either way |
 | **Coordinator/worker delegation** — the split, model table, prompt contract, QA loop, OpenCode worker budget, viz default | In `CLAUDE.md` — always loaded | Moved to `skills/delegate/SKILL.md`, a **user-invoked skill** (`disable-model-invocation: true`) loaded only when you type `delegate` |
 
-Pick this branch if you want the simplest install (one `CLAUDE.md`, no skill to copy) and you're
-fine paying the delegation framework's context cost on every session. Pick `framework-as-skill` if
-you want plain, non-delegating sessions to pay **zero** context load for the coordinator/worker
-rules and to opt into them on demand. `framework-as-skill` is also packaged as a **Claude Code
-plugin** (hooks, skill, and budget doctrine install via `/plugin` instead of hand-copying files).
+Pick this branch if you want the simplest install (one `CLAUDE.md`, no skill to copy, no plugin
+machinery) and you're fine paying the delegation framework's context cost on every session. Pick
+`framework-as-skill` if you want plain, non-delegating sessions to pay **zero** context load for
+the coordinator/worker rules and to opt into them on demand.
+
+`framework-as-skill` is also packaged as a **Claude Code plugin** (`opencode-coordinator`) and is
+the repo's **default branch**, so the plugin installs directly from GitHub:
+
+```text
+/plugin marketplace add arthur-albuquerque/claude_opencode_settings
+/plugin install opencode-coordinator@claude-opencode-settings
+```
+
+This `main` branch deliberately stays plugin-free — a second plugin carrying the same hooks and
+doctrine would double-inject warnings and context if both were ever enabled. Install this branch
+by copying files (Setup below), or use the plugin from `framework-as-skill` instead.
 
 ## What's in here
 
