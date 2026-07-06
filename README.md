@@ -19,7 +19,7 @@ token spend (writing code) happens on a flat-rate $12/5h worker plan instead of 
 
 ## How this branch differs from `framework-as-skill`
 
-This is the `main` branch, where the **entire** framework lives in the global `~/.claude/CLAUDE.md`.
+This is the `global` branch, where the **entire** framework lives in the global `~/.claude/CLAUDE.md`.
 Every Claude session — even one where you never intend to delegate — loads the whole system prompt:
 the coordinator/worker rules, the model table, the delegation contract, the QA loop, *and* the
 budget pacing. It's one file, always in context, nothing to invoke.
@@ -27,7 +27,7 @@ budget pacing. It's one file, always in context, nothing to invoke.
 The [`framework-as-skill`](https://github.com/arthur-albuquerque/claude_opencode_settings/tree/framework-as-skill)
 branch **splits the framework by scope** so nothing is forced on a session that doesn't need it:
 
-| Concern | `main` (this branch) | `framework-as-skill` |
+| Concern | `global` (this branch) | `framework-as-skill` |
 |---------|----------------------|----------------------|
 | **Claude-usage-limit pacing** — dead-man's switch, auto-resume loop | In `CLAUDE.md` | In `CLAUDE.md` — stays always-on either way |
 | **Coordinator/worker delegation** — the split, model table, prompt contract, QA loop, OpenCode worker budget, viz default | In `CLAUDE.md` — always loaded | Moved to `skills/delegate/SKILL.md`, a **user-invoked skill** (`disable-model-invocation: true`) loaded only when you type `delegate` |
@@ -45,7 +45,7 @@ the repo's **default branch**, so the plugin installs directly from GitHub:
 /plugin install opencode-coordinator@claude-opencode-settings
 ```
 
-This `main` branch deliberately stays plugin-free — a second plugin carrying the same hooks and
+This `global` branch deliberately stays plugin-free — a second plugin carrying the same hooks and
 doctrine would double-inject warnings and context if both were ever enabled. Install this branch
 by copying files (Setup below), or use the plugin from `framework-as-skill` instead.
 
