@@ -35,7 +35,8 @@ branch **splits the framework by scope** so nothing is forced on a session that 
 Pick this branch if you want the simplest install (one `CLAUDE.md`, no skill to copy) and you're
 fine paying the delegation framework's context cost on every session. Pick `framework-as-skill` if
 you want plain, non-delegating sessions to pay **zero** context load for the coordinator/worker
-rules and to opt into them on demand.
+rules and to opt into them on demand. `framework-as-skill` is also packaged as a **Claude Code
+plugin** (hooks, skill, and budget doctrine install via `/plugin` instead of hand-copying files).
 
 ## What's in here
 
@@ -76,9 +77,10 @@ rules and to opt into them on demand.
   the doctrine runs at full tier until the gateway blocks). Rules cover wave sizing and never
   silently dropping work.
 - **Auto-resume loop.** When a long autonomous job pauses near a usage limit, the session
-  schedules its own wakeups (chained hourly `ScheduleWakeup` calls, since resets can be hours
-  out), re-checks both budgets on each wake with a minimal two-command turn, and resumes the
-  remaining plan the moment a window clears — no human restart needed.
+  schedules its own wakeups timed to the tripped window's exact reset time (`resets_at` from the
+  snapshot, +60s pad — chained hourly only when the reset is more than 1h out), re-checks both
+  budgets on each wake with a minimal two-command turn, and resumes the remaining plan the moment
+  a window clears — no human restart needed, and no useful time lost to fixed-interval polling.
 - **Built for Claude's auto mode.** The coordinator/worker split, built-in verification, and
   auto-resume loop are designed so Claude can drive long coding sessions with minimal human input;
   auto mode is the ideal way to use this setup.

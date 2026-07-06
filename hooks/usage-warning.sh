@@ -29,7 +29,7 @@ msg=$(jq -r '
      then {name:"5-hour", pct:p(.five_hour), reset:(.five_hour.resets_at // 0)}
      else {name:"weekly", pct:p(.seven_day), reset:(.seven_day.resets_at // 0)} end) as $w
   | ([($w.reset - now), 0] | max) as $left
-  | ([$left + 120, 3600] | min) as $delay
+  | ([$left + 60, 3600] | min) as $delay
   | if $w.pct >= 95 then
       "⛔ BUDGET STOP — Claude \($w.name) usage window at \($w.pct|floor)% used (resets in \(($left/60)|floor) min). Per CLAUDE.md Budget-aware pacing: stop starting new work; checkpoint state in one sentence; call ScheduleWakeup(delaySeconds=\($delay|floor)) with a self-contained resume prompt; tell the user the \($w.name) window tripped at \($w.pct|floor)%. Then enter the Auto-resume loop — do not start new heavy work."
     elif $w.pct >= 90 then
