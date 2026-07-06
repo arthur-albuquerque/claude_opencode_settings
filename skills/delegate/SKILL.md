@@ -89,9 +89,9 @@ After every worker run:
 
 ## OpenCode Go worker budget (workers: $12/5h, $30/wk, $60/mo)
 
-This is the delegation-only budget. Your **Claude usage limit** is a separate, always-on concern handled in `~/.claude/CLAUDE.md` (Budget-aware pacing) — never use one to reason about the other.
+This is the delegation-only budget. Your **Claude usage limit** is a separate, always-on concern handled by the Budget-aware pacing doctrine (injected by this plugin's SessionStart hook, or `~/.claude/CLAUDE.md` on manual installs) — never use one to reason about the other.
 
-**The signal.** `python3 ~/.claude/scripts/opencode-go-usage.py`. The `gateway` probe is authoritative and the only budget signal (exit 2 = blocked, with `window` + `reset_in_sec`; exit 0 = clear; probing is free). There is no proactive percent-used signal — run at full tier until the gateway blocks. Details in the script's docstring.
+**The signal.** `opencode-go-usage.py` (on `PATH` from this plugin's `bin/`; manual installs: `python3 ~/.claude/scripts/opencode-go-usage.py`). The `gateway` probe is authoritative and the only budget signal (exit 2 = blocked, with `window` + `reset_in_sec`; exit 0 = clear; probing is free). There is no proactive percent-used signal — run at full tier until the gateway blocks. Details in the script's docstring.
 
 Rules for every session that delegates:
 - A wave = ≤3 parallel opencode workers on non-overlapping files — never Claude subagents.
@@ -100,7 +100,7 @@ Rules for every session that delegates:
 
 Extra rules for long autonomous jobs (multi-wave delegation, `/loop`, overnight runs):
 - Proactively run the worker probe between waves — don't wait for a failure signal.
-- Pausing on a worker block: collect in-flight workers, report the triggering window + numbers + remaining work, then enter the **Auto-resume loop in `~/.claude/CLAUDE.md`** — but compute time-to-reset from the gateway probe's `reset_in_sec` instead of the snapshot. While work remains, never end a turn without a scheduled wakeup — an unscheduled pause means I have to restart you by hand, which defeats the point.
+- Pausing on a worker block: collect in-flight workers, report the triggering window + numbers + remaining work, then enter the **Auto-resume loop of the Budget-aware pacing doctrine** (always in context — injected by this plugin or from `~/.claude/CLAUDE.md`) — but compute time-to-reset from the gateway probe's `reset_in_sec` instead of the snapshot. While work remains, never end a turn without a scheduled wakeup — an unscheduled pause means I have to restart you by hand, which defeats the point.
 
 ## Visualization default
 

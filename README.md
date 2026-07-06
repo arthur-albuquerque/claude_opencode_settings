@@ -34,22 +34,31 @@ need:
 
 The budget pacing has to stay always-on: the `usage-warning.sh` hook injects a warning on every
 session, so the response protocol (pause → arm `ScheduleWakeup` → auto-resume) must always be in
-context. The delegation framework does *not* — you opt into it by typing `delegate`, and it loads
+context. The delegation framework does *not* — you opt into it by typing `/delegate`, and it loads
 for that session only. A plain, non-delegating session pays zero context load for it.
 
 The `delegate` skill is set `disable-model-invocation: true`, so it costs nothing until you invoke
 it by name and the model never fires it on its own.
 
+On this branch the repo is also packaged as a **Claude Code plugin** (`opencode-coordinator`), so
+the hooks, the skill, the worker-budget script, and the always-on doctrine all install with one
+`/plugin` command instead of hand-copying files — see Setup.
+
 ## What's in here
 
-| File | Installs to | Purpose |
-|------|-------------|---------|
-| `CLAUDE.md` | `~/.claude/CLAUDE.md` | Always-on budget pacing only: the Claude usage-limit signal, dead-man's switch, and auto-resume loop |
-| `skills/delegate/SKILL.md` | `~/.claude/skills/delegate/SKILL.md` | The opt-in coordinator/worker framework: delegation rules, model table, prompt contract, QA loop, worker budget |
-| `statusline-command.sh` | `~/.claude/statusline-command.sh` | Claude Code status line script that persists `~/.claude/usage-snapshot.json` |
-| `hooks/usage-warning.sh` | `~/.claude/hooks/usage-warning.sh` | Hook that auto-injects a budget warning into the agent's context at ≥90% / ≥95% of a Claude usage window |
-| `scripts/opencode-go-usage.py` | `~/.claude/scripts/opencode-go-usage.py` | OpenCode Go budget check (authoritative gateway blocked-state probe) |
-| `opencode.worker-agent.example.json` | merge into `~/.config/opencode/opencode.json` | The `worker` agent definition that lets `opencode run` edit files non-interactively |
+The repo root **is** the plugin. Everything below the first group installs automatically when the
+plugin is enabled; the last two rows are the irreducible manual pieces a plugin cannot ship.
+
+| File | Role in the plugin | Purpose |
+|------|--------------------|---------|
+| `.claude-plugin/plugin.json` | manifest | Plugin identity (`opencode-coordinator`); `.claude-plugin/marketplace.json` makes this repo installable as its own marketplace |
+| `CLAUDE.md` | injected by hook | Always-on budget pacing: the Claude usage-limit signal, dead-man's switch, auto-resume loop. Plugins don't load a root `CLAUDE.md`, so `hooks/inject-budget-doctrine.sh` pushes it into context at `SessionStart` |
+| `skills/delegate/SKILL.md` | skill | The opt-in coordinator/worker framework: delegation rules, model table, prompt contract, QA loop, worker budget. Invoke with `/delegate` |
+| `hooks/hooks.json` | hook wiring | Wires `usage-warning.sh` to `PostToolUse` + `SessionStart` and `inject-budget-doctrine.sh` to `SessionStart` — no `settings.json` editing |
+| `hooks/usage-warning.sh` | hook | Auto-injects a budget warning into the agent's context at ≥90% / ≥95% of a Claude usage window |
+| `bin/opencode-go-usage.py` | on `PATH` while enabled | OpenCode Go budget check (authoritative gateway blocked-state probe) |
+| `statusline-command.sh` | **manual** → `~/.claude/statusline-command.sh` | Status line script that persists `~/.claude/usage-snapshot.json`. A plugin cannot set the main `statusLine`, and the status line is the only surface that receives live `rate_limits` data — this install cannot be skipped |
+| `opencode.worker-agent.example.json` | **manual** → merge into `~/.config/opencode/opencode.json` | The `worker` agent definition that lets `opencode run` edit files non-interactively. Lives in opencode's config, outside Claude Code's reach |
 
 ## What the framework does
 
@@ -64,11 +73,12 @@ it by name and the model never fires it on its own.
 - **Dead-man's switch.** A proactively-armed `ScheduleWakeup` backstops the one case the hook can't
   catch — a hard trip mid-turn on a lagging snapshot.
 - **Auto-resume loop.** When a long autonomous job pauses near a usage limit, the session schedules
-  its own wakeups (chained hourly `ScheduleWakeup` calls, since resets can be hours out), re-checks
-  the tripped window on each wake with a minimal turn, and resumes the remaining plan the moment the
-  window clears — no human restart needed.
+  its own wakeups timed to the tripped window's exact reset time (`resets_at` from the snapshot,
+  +60s pad — chained hourly only when the reset is more than 1h out), re-checks the tripped window
+  on each wake with a minimal turn, and resumes the remaining plan the moment the window clears —
+  no human restart needed, and no useful time lost to fixed-interval polling.
 
-### Opt-in (`delegate` skill — invoke with `delegate`)
+### Opt-in (`delegate` skill — invoke with `/delegate`)
 
 - **Coordinator/worker split.** Clear rules for what Claude does directly (trivial edits, config,
   git), what it delegates (anything that writes or modifies code), and what it must never delegate
@@ -93,43 +103,33 @@ it by name and the model never fires it on its own.
 1. **Prerequisites:** [Claude Code](https://claude.com/claude-code), the
    [opencode CLI](https://opencode.ai) with an OpenCode Go subscription (run `/connect` inside
    opencode once so `~/.local/share/opencode/auth.json` holds your key), Python 3, and `jq`.
-2. Copy `CLAUDE.md` to `~/.claude/CLAUDE.md` (or append to yours). This installs only the always-on
-   budget pacing.
-3. **Install the `delegate` skill.** Copy the whole folder:
-
-   ```bash
-   mkdir -p ~/.claude/skills/delegate
-   cp skills/delegate/SKILL.md ~/.claude/skills/delegate/SKILL.md
-   ```
-
-   Then in any Claude Code session, type `delegate` to load the coordinator/worker framework for
-   that session. Because it is `disable-model-invocation: true`, it never activates unless you invoke
-   it by name.
-4. Copy `statusline-command.sh` to `~/.claude/statusline-command.sh` and wire it into Claude Code.
-   The easiest way is to run this inside Claude Code (it will update your `~/.claude/settings.json`):
+2. **Install the plugin.** Inside Claude Code:
 
    ```text
-   /statusline use the existing executable script at ~/.claude/statusline-command.sh as the status-line command; it reads JSON from stdin and prints the context-window token count, 5-hour usage percentage with time remaining, and weekly usage percentage with reset time
+   /plugin marketplace add arthur-albuquerque/claude_opencode_settings
+   /plugin install opencode-coordinator@claude-opencode-settings
    ```
 
-   Or add it manually to `~/.claude/settings.json`:
+   (Or, from a local clone: `claude plugin marketplace add /path/to/claude_opencode_settings`,
+   then the same install command.) This wires everything a plugin can carry:
+   - the `usage-warning.sh` hook on `PostToolUse` + `SessionStart` — no `settings.json` editing;
+   - the always-on budget doctrine (`CLAUDE.md`), injected into context at `SessionStart` by
+     `inject-budget-doctrine.sh` (it skips itself if your `~/.claude/CLAUDE.md` already contains a
+     "Budget-aware pacing" section, so you won't get it twice);
+   - the `delegate` skill — type `/delegate` to switch a session into coordinator/worker mode; it
+     is `disable-model-invocation: true`, so it never activates unless you invoke it by name;
+   - `opencode-go-usage.py` on the Bash `PATH`.
 
-   ```json
-   {
-     "statusLine": {
-       "type": "command",
-       "command": "~/.claude/statusline-command.sh"
-     }
-   }
-   ```
+   Two pieces **cannot** ship in a plugin and stay manual: the status line (step 3) and the
+   opencode worker agent (step 4).
 
-   The script runs after each assistant message and writes `~/.claude/usage-snapshot.json`, which
-   `CLAUDE.md` reads as the authoritative Claude-window budget signal.
-5. **Install the usage-warning hook — this is the Claude-window budget signal, not an add-on.**
-   Copy `hooks/usage-warning.sh` to `~/.claude/hooks/usage-warning.sh`, `chmod +x` it, then wire it
-   into `~/.claude/settings.json` on `PostToolUse` (fires every agentic turn, including autonomous
-   `/loop` and `ScheduleWakeup` wakes) and `SessionStart` (fires on resume). If those events already
-   have hooks, **append** this entry to their `hooks` array rather than replacing it:
+   <details>
+   <summary>Manual install (no plugin)</summary>
+
+   Copy `CLAUDE.md` to `~/.claude/CLAUDE.md` (or append to yours); copy `skills/delegate/SKILL.md`
+   to `~/.claude/skills/delegate/SKILL.md`; copy `hooks/usage-warning.sh` to
+   `~/.claude/hooks/usage-warning.sh`, `chmod +x` it, and wire it into `~/.claude/settings.json`
+   on `PostToolUse` + `SessionStart` (append to those events' `hooks` arrays if they exist):
 
    ```json
    {
@@ -148,14 +148,39 @@ it by name and the model never fires it on its own.
    }
    ```
 
-   The hook is silent below 90%; at ≥90% it injects a heads-up and at ≥95% a stop directive that
-   quotes the pause procedure. It reads only the snapshot (no API calls). Test it before wiring:
-   `printf '{"hook_event_name":"PostToolUse"}' | CLAUDE_USAGE_SNAPSHOT=<fixture.json> ~/.claude/hooks/usage-warning.sh`.
-6. Copy `scripts/opencode-go-usage.py` to `~/.claude/scripts/`.
-7. Merge the `agent.worker` block from `opencode.worker-agent.example.json` into your
+   Finally copy `bin/opencode-go-usage.py` to `~/.claude/scripts/opencode-go-usage.py`. Skip
+   `hooks/hooks.json` and `hooks/inject-budget-doctrine.sh` — those are plugin plumbing.
+   </details>
+
+3. Copy `statusline-command.sh` to `~/.claude/statusline-command.sh` and wire it into Claude Code.
+   The easiest way is to run this inside Claude Code (it will update your `~/.claude/settings.json`):
+
+   ```text
+   /statusline use the existing executable script at ~/.claude/statusline-command.sh as the status-line command; it reads JSON from stdin and prints the context-window token count, 5-hour usage percentage with time remaining, and weekly usage percentage with reset time
+   ```
+
+   Or add it manually to `~/.claude/settings.json`:
+
+   ```json
+   {
+     "statusLine": {
+       "type": "command",
+       "command": "~/.claude/statusline-command.sh"
+     }
+   }
+   ```
+
+   The script runs after each assistant message and writes `~/.claude/usage-snapshot.json`, the
+   snapshot the usage-warning hook reads. Without this step the hook stays silent and the whole
+   Claude-window budget signal is dead — it is not optional.
+
+   The hook itself is silent below 90%; at ≥90% it injects a heads-up and at ≥95% a stop directive
+   that quotes the pause procedure. It reads only the snapshot (no API calls). Test it any time:
+   `printf '{"hook_event_name":"PostToolUse"}' | CLAUDE_USAGE_SNAPSHOT=<fixture.json> hooks/usage-warning.sh`.
+4. Merge the `agent.worker` block from `opencode.worker-agent.example.json` into your
    `~/.config/opencode/opencode.json`. Without it, `opencode run` auto-rejects file edits and
    delegation silently fails.
-8. **Disable opencode's Claude Code compatibility.** OpenCode loads `~/.claude/CLAUDE.md` as a
+5. **Disable opencode's Claude Code compatibility.** OpenCode loads `~/.claude/CLAUDE.md` as a
    fallback instruction file by default. Because that file is written for Claude Code (budget pacing
    that drives `ScheduleWakeup` and other Claude-Code-only behavior), letting opencode read it causes
    opencode sessions to inherit rules they should not execute, and breaks `opencode run` / direct
@@ -169,9 +194,9 @@ it by name and the model never fires it on its own.
    There is no equivalent key in `opencode.json`; this is the only supported mechanism. If you
    want to keep `.claude/skills` available to opencode but only suppress the `CLAUDE.md` prompt
    fallback, use `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1` instead.
-9. Start a Claude Code session anywhere — the global `CLAUDE.md` budget pacing applies to every
-   project automatically; type `delegate` whenever you want to switch that session into
-   coordinator/worker mode.
+6. Start a Claude Code session anywhere — the budget-pacing doctrine loads in every session
+   (injected by the plugin at `SessionStart`, or from `~/.claude/CLAUDE.md` on manual installs);
+   type `/delegate` whenever you want to switch that session into coordinator/worker mode.
 
 ## Caveats
 
