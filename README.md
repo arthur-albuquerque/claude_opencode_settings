@@ -17,16 +17,16 @@ the same session.
 The goal: long, productive Claude sessions that don't burn through usage limits, because the bulk
 token spend (writing code) happens on a flat-rate $12/5h worker plan instead of on Claude.
 
-## How this branch differs from `main`
+## How this branch differs from `global`
 
 This (`framework-as-skill`) is the repo's **default branch** and the recommended install: it is
 packaged as the `opencode-coordinator` **Claude Code plugin**, so `/plugin marketplace add
 arthur-albuquerque/claude_opencode_settings` resolves here.
 
-On the [`main`](https://github.com/arthur-albuquerque/claude_opencode_settings/tree/main) branch the
-**entire** framework lives in the global `~/.claude/CLAUDE.md`, so every Claude session — even one
-where you never intend to delegate — is forced to load the coordinator/worker rules, the model
-table, and the delegation contract. `main` is deliberately **not** packaged as a plugin (a second
+On the [`global`](https://github.com/arthur-albuquerque/claude_opencode_settings/tree/global) branch
+the **entire** framework lives in the global `~/.claude/CLAUDE.md`, so every Claude session — even
+one where you never intend to delegate — is forced to load the coordinator/worker rules, the model
+table, and the delegation contract. `global` is deliberately **not** packaged as a plugin (a second
 plugin carrying the same hooks and doctrine would double-inject warnings and context if both were
 enabled); it installs by copying files.
 
