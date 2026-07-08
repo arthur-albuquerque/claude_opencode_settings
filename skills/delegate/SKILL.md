@@ -47,12 +47,13 @@ How to apply:
 
 ## Mechanics
 
-Workers run via Bash in the project directory:
+Workers run via Bash in the project directory. Write the full delegation prompt to a file in `/tmp`, then launch with a one-line pointer prompt:
 
 ```bash
-opencode run --pure --agent worker -m opencode-go/<model> "<self-contained prompt>"
+opencode run --pure --agent worker -m opencode-go/<model> "Read the file /tmp/<task>_prompt.md and follow its instructions exactly."
 ```
 
+- Never pass more than ~500 characters as the argv prompt (longer argv prompts silently hang `opencode run`). If a worker's stdout is still empty ~2 min after launch, kill it and relaunch.
 - `--agent worker` is a preconfigured executor in `~/.config/opencode/opencode.json` with non-interactive file-edit and bash permissions (plain `opencode run` auto-rejects edits — never omit it). Dangerous ops (sudo, ssh, git push, npm publish) stay denied; you handle git yourself.
 - `--pure` skips external plugins (oh-my-openagent) so runs are clean and fast. Keep it.
 - Launch **every** worker with `run_in_background: true` and **no `timeout`** — worker runs take minutes and foreground Bash caps at 10 min, which kills a run mid-edit. The harness notifies you when each run exits; review each result as it lands. If a worker looks hung, inspect and kill it deliberately — never rely on a timer to reap it. Don't run two workers over overlapping files.
