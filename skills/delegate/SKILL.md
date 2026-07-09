@@ -32,7 +32,7 @@ Rankings, higher = better. Cost reflects what I actually pay on OpenCode Go ($12
 | glm-5.2                | 4    | 9            | 8     | deepest reasoner, 1M ctx, repo-scale work     |
 
 Superseded — never pick: glm-5.1, kimi-k2.6, minimax-m2.7, qwen3.6-plus (use the newer sibling instead).
-Too expensive — avoid: qwen3.7-max (use kimi-k2.7-code or glm-5.2 instead).
+Too expensive — avoid: qwen3.7-max (use kimi-k2.7-code or Opus 4.8 at high effort instead).
 
 How to apply:
 - These are defaults, not limits. Standing permission to escalate: if a cheaper model's output doesn't meet the bar, re-run with a smarter model without asking. Judge the output, not the price tag.
@@ -41,7 +41,7 @@ How to apply:
 - Standard implementation from a good spec: **deepseek-v4-pro**.
 - Hard coding, multi-file changes, tricky debugging: **kimi-k2.7-code**.
 - Repo-scale context or an independent deep-reasoning second opinion: **glm-5.2**.
-- Anything user-facing (UI, copy, API design) needs taste ≥ 7: **kimi-k2.7-code** or **glm-5.2**.
+- Anything user-facing (UI, copy, API design) needs taste ≥ 7: **kimi-k2.7-code**, or **Opus 4.8 at high effort** (do it yourself, not via opencode).
 - Screenshots / visual QA / image inputs: **mimo-v2.5** (attach with `-f <file>`).
 - Escalation ladder when output fails review: flash → pro → kimi-k2.7-code → glm-5.2 → fix it yourself.
 
