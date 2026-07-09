@@ -54,6 +54,7 @@ opencode run --pure --agent worker -m opencode-go/<model> "Read the file /tmp/<t
 ```
 
 - Never pass more than ~500 characters as the argv prompt (longer argv prompts silently hang `opencode run`). If a worker's stdout is still empty ~2 min after launch, kill it and relaunch.
+- Workers must never spawn opencode subagents: the `task` tool is disabled for the worker agent in `~/.config/opencode/opencode.json` (subagents run as `general` with ask-mode permissions, which deadlocks headless runs — parent waits forever, SIGKILL required). Keep that `"tools": {"task": false}` block; if a worker still announces it is "delegating to a subagent" and goes silent mid-run, that's this hang — `pkill -9 -f "opencode run"` and split the job into smaller pointer-file prompts yourself instead.
 - `--agent worker` is a preconfigured executor in `~/.config/opencode/opencode.json` with non-interactive file-edit and bash permissions (plain `opencode run` auto-rejects edits — never omit it). Dangerous ops (sudo, ssh, git push, npm publish) stay denied; you handle git yourself.
 - `--pure` skips external plugins (oh-my-openagent) so runs are clean and fast. Keep it.
 - Launch **every** worker with `run_in_background: true` and **no `timeout`** — worker runs take minutes and foreground Bash caps at 10 min, which kills a run mid-edit. The harness notifies you when each run exits; review each result as it lands. If a worker looks hung, inspect and kill it deliberately — never rely on a timer to reap it. Don't run two workers over overlapping files.
