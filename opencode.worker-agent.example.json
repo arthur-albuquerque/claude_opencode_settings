@@ -3,7 +3,10 @@
   "agent": {
     "worker": {
       "mode": "primary",
-      "description": "Non-interactive executor for tasks delegated from Claude Code via `opencode run`. Permissive edit/bash so it can work unattended; dangerous operations stay denied.",
+      "description": "Non-interactive executor for tasks delegated from Claude Code via `opencode run`. Permissive edit/bash so it can work unattended; dangerous operations stay denied. Task tool disabled: subagents spawn as `general` with ask-mode permissions, which deadlocks headless runs.",
+      "tools": {
+        "task": false
+      },
       "permission": {
         "edit": "allow",
         "external_directory": "allow",
