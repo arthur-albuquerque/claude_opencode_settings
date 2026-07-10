@@ -60,8 +60,9 @@ plugin is enabled; the last two rows are the irreducible manual pieces a plugin 
 | `.claude-plugin/plugin.json` | manifest | Plugin identity (`opencode-coordinator`); `.claude-plugin/marketplace.json` makes this repo installable as its own marketplace |
 | `CLAUDE.md` | injected by hook | Always-on budget pacing: the Claude usage-limit signal, dead-man's switch, auto-resume loop. Plugins don't load a root `CLAUDE.md`, so `hooks/inject-budget-doctrine.sh` pushes it into context at `SessionStart` |
 | `skills/delegate/SKILL.md` | skill | The opt-in coordinator/worker framework: delegation rules, model table, prompt contract, QA loop, worker budget. Invoke with `/delegate` |
-| `hooks/hooks.json` | hook wiring | Wires `usage-warning.sh` to `PostToolUse` + `SessionStart` and `inject-budget-doctrine.sh` to `SessionStart` — no `settings.json` editing |
+| `hooks/hooks.json` | hook wiring | Wires `usage-warning.sh` to `PostToolUse` + `SessionStart`, `inject-budget-doctrine.sh` to `SessionStart`, and `announce-wakeup.sh` to `PostToolUse` (matcher `ScheduleWakeup`) — no `settings.json` editing |
 | `hooks/usage-warning.sh` | hook | Auto-injects a budget warning into the agent's context at ≥90% / ≥95% of a Claude usage window |
+| `hooks/announce-wakeup.sh` | hook | Fires after every `ScheduleWakeup` call, computes the exact wall-clock fire time, and injects a directive forcing the agent to tell the user — in that turn's final message — that a wakeup is armed, when exactly it fires, why, and what happens on wake (or that the loop was stopped). Kills the "session went silent" failure mode |
 | `bin/opencode-go-usage.py` | on `PATH` while enabled | OpenCode Go budget check (authoritative gateway blocked-state probe) |
 | `statusline-command.sh` | **manual** → `~/.claude/statusline-command.sh` | Status line script that persists `~/.claude/usage-snapshot.json`. A plugin cannot set the main `statusLine`, and the status line is the only surface that receives live `rate_limits` data — this install cannot be skipped |
 | `opencode.worker-agent.example.json` | **manual** → merge into `~/.config/opencode/opencode.json` | The `worker` agent definition that lets `opencode run` edit files non-interactively. Lives in opencode's config, outside Claude Code's reach |
@@ -78,6 +79,10 @@ plugin is enabled; the last two rows are the irreducible manual pieces a plugin 
   pause no longer depends on the agent remembering to check.
 - **Dead-man's switch.** A proactively-armed `ScheduleWakeup` backstops the one case the hook can't
   catch — a hard trip mid-turn on a lagging snapshot.
+- **Announced wakeups.** `hooks/announce-wakeup.sh` fires after every `ScheduleWakeup` call and
+  injects a directive (with the computed fire time) that forces the agent to announce the wakeup to
+  the user before ending the turn: exact local fire time, reason, and the on-wake plan. Without it,
+  an agent that pauses on a budget stop looks like a dead session until the user asks.
 - **Auto-resume loop.** When a long autonomous job pauses near a usage limit, the session schedules
   its own wakeups timed to the tripped window's exact reset time (`resets_at` from the snapshot,
   +60s pad — chained hourly only when the reset is more than 1h out), re-checks the tripped window
@@ -133,9 +138,9 @@ plugin is enabled; the last two rows are the irreducible manual pieces a plugin 
    <summary>Manual install (no plugin)</summary>
 
    Copy `CLAUDE.md` to `~/.claude/CLAUDE.md` (or append to yours); copy `skills/delegate/SKILL.md`
-   to `~/.claude/skills/delegate/SKILL.md`; copy `hooks/usage-warning.sh` to
-   `~/.claude/hooks/usage-warning.sh`, `chmod +x` it, and wire it into `~/.claude/settings.json`
-   on `PostToolUse` + `SessionStart` (append to those events' `hooks` arrays if they exist):
+   to `~/.claude/skills/delegate/SKILL.md`; copy `hooks/usage-warning.sh` and
+   `hooks/announce-wakeup.sh` to `~/.claude/hooks/`, `chmod +x` both, and wire them into
+   `~/.claude/settings.json` (append to those events' `hooks` arrays if they exist):
 
    ```json
    {
@@ -143,6 +148,9 @@ plugin is enabled; the last two rows are the irreducible manual pieces a plugin 
        "PostToolUse": [
          { "matcher": "*", "hooks": [
            { "type": "command", "command": "~/.claude/hooks/usage-warning.sh", "timeout": 5 }
+         ]},
+         { "matcher": "ScheduleWakeup", "hooks": [
+           { "type": "command", "command": "~/.claude/hooks/announce-wakeup.sh", "timeout": 5 }
          ]}
        ],
        "SessionStart": [

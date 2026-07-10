@@ -15,6 +15,12 @@
         "hooks": [
           { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/usage-warning.sh", "timeout": 5 }
         ]
+      },
+      {
+        "matcher": "ScheduleWakeup",
+        "hooks": [
+          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/announce-wakeup.sh", "timeout": 5 }
+        ]
       }
     ]
   }
