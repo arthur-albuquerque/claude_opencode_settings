@@ -56,6 +56,7 @@ by copying files (Setup below), or use the plugin from `framework-as-skill` inst
 | `CLAUDE.md` | `~/.claude/CLAUDE.md` | The whole system prompt: delegation rules, model table, budget pacing, auto-resume |
 | `statusline-command.sh` | `~/.claude/statusline-command.sh` | Claude Code status line script that persists `~/.claude/usage-snapshot.json` |
 | `hooks/usage-warning.sh` | `~/.claude/hooks/usage-warning.sh` | Hook that auto-injects a budget warning into the agent's context at ≥90% / ≥95% of a Claude usage window |
+| `hooks/announce-wakeup.sh` | `~/.claude/hooks/announce-wakeup.sh` | Hook that fires after every `ScheduleWakeup` call and forces the agent to tell the user — in that turn's final message — that a wakeup is armed, when exactly it fires, why, and what happens on wake |
 | `scripts/opencode-go-usage.py` | `~/.claude/scripts/opencode-go-usage.py` | OpenCode Go budget check (authoritative gateway blocked-state probe) |
 | `opencode.worker-agent.example.json` | merge into `~/.config/opencode/opencode.json` | The `worker` agent definition that lets `opencode run` edit files non-interactively |
 
@@ -81,7 +82,10 @@ by copying files (Setup below), or use the plugin from `framework-as-skill` inst
   tool-using turn once a window crosses 90% (heads-up) / 95% (stop directive). The agent never
   polls; the warning comes to it, so the pause no longer depends on the agent remembering to
   check. A proactively-armed dead-man's-switch `ScheduleWakeup` backstops the one case the hook
-  can't catch — a hard trip mid-turn on a lagging snapshot. The worker
+  can't catch — a hard trip mid-turn on a lagging snapshot. Every `ScheduleWakeup` is also
+  announced: `hooks/announce-wakeup.sh` fires after the call and injects a directive (with the
+  computed wall-clock fire time) forcing the agent to tell the user that a wakeup is armed, when
+  exactly it fires, why, and the on-wake plan — so a paused session never looks dead. The worker
   plan is checked with `opencode-go-usage.py`, which probes the Go gateway with a 1-token request
   (blocked requests are rejected before billing, so probing is free) and reports blocked-state +
   reset time authoritatively — the only budget signal (there is no key-based percent-used API, so
@@ -122,11 +126,14 @@ by copying files (Setup below), or use the plugin from `framework-as-skill` inst
 
    The script runs after each assistant message and writes `~/.claude/usage-snapshot.json`, which
    `CLAUDE.md` reads as the authoritative Claude-window budget signal.
-4. **Install the usage-warning hook — this is the Claude-window budget signal, not an add-on.**
-   Copy `hooks/usage-warning.sh` to `~/.claude/hooks/usage-warning.sh`, `chmod +x` it, then wire it
-   into `~/.claude/settings.json` on `PostToolUse` (fires every agentic turn, including autonomous
-   `/loop` and `ScheduleWakeup` wakes) and `SessionStart` (fires on resume). If those events already
-   have hooks, **append** this entry to their `hooks` array rather than replacing it:
+4. **Install the hooks — the usage warning is the Claude-window budget signal, not an add-on.**
+   Copy `hooks/usage-warning.sh` and `hooks/announce-wakeup.sh` to `~/.claude/hooks/`, `chmod +x`
+   both, then wire them into `~/.claude/settings.json`: `usage-warning.sh` on `PostToolUse` (fires
+   every agentic turn, including autonomous `/loop` and `ScheduleWakeup` wakes) and `SessionStart`
+   (fires on resume); `announce-wakeup.sh` on `PostToolUse` with matcher `ScheduleWakeup` (fires
+   right after the agent arms/refreshes/stops a wakeup and forces it to announce the fire time and
+   reason to you). If those events already have hooks, **append** these entries to their `hooks`
+   array rather than replacing it:
 
    ```json
    {
@@ -134,6 +141,9 @@ by copying files (Setup below), or use the plugin from `framework-as-skill` inst
        "PostToolUse": [
          { "matcher": "*", "hooks": [
            { "type": "command", "command": "~/.claude/hooks/usage-warning.sh", "timeout": 5 }
+         ]},
+         { "matcher": "ScheduleWakeup", "hooks": [
+           { "type": "command", "command": "~/.claude/hooks/announce-wakeup.sh", "timeout": 5 }
          ]}
        ],
        "SessionStart": [

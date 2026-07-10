@@ -98,7 +98,7 @@ The snapshot is the hook's data source, not something you watch. Read it directl
 **The rule.** The moment the hook injects its ≥95% stop directive (or a harness `<system-reminder>` limit warning appears):
 1. Stop starting new work; checkpoint state in one sentence.
 2. Enter the Auto-resume loop below, arming the wakeup off the tripped window's `.resets_at` (read it from the snapshot).
-3. Tell me which window tripped and its percentage.
+3. Tell me which window tripped and its percentage, and announce the wakeup (rule below).
 
 The ≥90% heads-up is your runway: finish the current step, don't start a heavy new chunk, don't pause yet.
 
@@ -110,6 +110,8 @@ The ≥90% heads-up is your runway: finish the current step, don't start a heavy
 - **Refresh** it as work advances; **drop** it when the work is done.
 
 Leaving one armed is safe — a wakeup that outlives its task just ends the turn (loop step 3).
+
+**Announce every wakeup — never pause silently.** An armed wakeup is invisible to me: if you arm one and end the turn without saying so, the session just looks dead. So every time you **arm, refresh, or stop** a `ScheduleWakeup` — budget pause, dead-man's switch, `/loop` pacing, anything — the final user-visible message of that turn MUST state, in plain language: (1) that a wakeup is armed and the session will pause and resume itself (or, on stop, that automatic resumes have ended); (2) the **exact local fire time** and roughly how far away it is; (3) **why** the wakeup exists; (4) what you will do when it fires. The `~/.claude/hooks/announce-wakeup.sh` hook (wired to `PostToolUse` with matcher `ScheduleWakeup`) computes the exact fire time and injects this requirement right after the tool call — relay what it reports; never end the turn with only tool output.
 
 ### OpenCode Go worker budget — only when you delegate (workers: $12/5h, $30/wk, $60/mo)
 
