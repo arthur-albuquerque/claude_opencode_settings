@@ -76,7 +76,10 @@ plugin is enabled; the last two rows are the irreducible manual pieces a plugin 
   `statusline-command.sh` on every status-line render using the harness's own accounting — and
   *pushes* the warning straight into the agent's context every tool-using turn once a window crosses
   90% (heads-up) / 95% (stop directive). The agent never polls; the warning comes to it, so the
-  pause no longer depends on the agent remembering to check.
+  pause no longer depends on the agent remembering to check. The stop is a default, not a hard
+  wall: on an explicit user request to continue regardless of usage, the agent writes the tripped
+  window's reset epoch to `~/.claude/usage-override` and the hook downgrades the stop to a one-line
+  reminder until that epoch passes (then deletes the file and restores the default).
 - **Dead-man's switch.** A proactively-armed `ScheduleWakeup` backstops the one case the hook can't
   catch — a hard trip mid-turn on a lagging snapshot.
 - **Announced wakeups.** `hooks/announce-wakeup.sh` fires after every `ScheduleWakeup` call and
@@ -189,8 +192,12 @@ plugin is enabled; the last two rows are the irreducible manual pieces a plugin 
    Claude-window budget signal is dead — it is not optional.
 
    The hook itself is silent below 90%; at ≥90% it injects a heads-up and at ≥95% a stop directive
-   that quotes the pause procedure. It reads only the snapshot (no API calls). Test it any time:
-   `printf '{"hook_event_name":"PostToolUse"}' | CLAUDE_USAGE_SNAPSHOT=<fixture.json> hooks/usage-warning.sh`.
+   that quotes the pause procedure. If `~/.claude/usage-override` holds a future unix epoch (written
+   by the agent only on an explicit user request to continue past the limit — see CLAUDE.md "User
+   override"), the stop is downgraded to a one-line reminder and the heads-up is suppressed; the
+   hook deletes the file once the epoch passes. It reads only the snapshot and the override file
+   (no API calls). Test it any time:
+   `printf '{"hook_event_name":"PostToolUse"}' | CLAUDE_USAGE_SNAPSHOT=<fixture.json> CLAUDE_USAGE_OVERRIDE=<flagfile> hooks/usage-warning.sh`.
 4. Merge the `agent.worker` block from `opencode.worker-agent.example.json` into your
    `~/.config/opencode/opencode.json`. Without it, `opencode run` auto-rejects file edits and
    delegation silently fails.
