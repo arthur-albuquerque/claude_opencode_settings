@@ -21,15 +21,16 @@ The ≥90% heads-up is your runway: finish the current step, don't start a heavy
 
 ## User override — "continue regardless of usage"
 
-The 95% stop is the **default**, not a hard wall. If I **explicitly** say to keep working despite the usage limit ("continue regardless of usage", "ignore the budget stop", "override the limit", or equivalent), that is authorization to continue. Then:
+The 95% stop is the **default**, not a hard wall. If I **explicitly** say to keep working despite the usage limit ("continue regardless of usage", "ignore the budget stop", "override the limit", or equivalent), that is authorization to continue **this session's** current task. Then:
 
-1. Activate the override so the hook stops injecting stop directives — write the **tripped window's** reset epoch to the flag file:
-   `jq -r '.five_hour.resets_at' ~/.claude/usage-snapshot.json > ~/.claude/usage-override` (use `.seven_day.resets_at` if the weekly window tripped). While that file holds a future epoch, the hook downgrades its ⛔ stop to a one-line 🔓 reminder and suppresses the ≥90% heads-up; once expired, the hook deletes the file and the default stop behavior returns on its own.
+1. Activate the override so the hook stops injecting stop directives — write the **tripped window's** reset epoch to this session's **per-session** flag file:
+   `jq -r '.five_hour.resets_at' ~/.claude/usage-snapshot.json > ~/.claude/usage-override-$CLAUDE_CODE_SESSION_ID` (use `.seven_day.resets_at` if the weekly window tripped). The filename is keyed to `$CLAUDE_CODE_SESSION_ID` on purpose: usage limits are per-account, so every session trips 95% at once, but this file lifts the stop for **this session only** — other sessions stay stopped. While the file holds a future epoch, the hook downgrades this session's ⛔ stop to a one-line 🔓 reminder and suppresses its ≥90% heads-up.
 2. Keep working — but keep exactly one dead-man's-switch `ScheduleWakeup` armed the entire time. The override silences the **hook**, not the **hard limit**: a hard trip can still lock the session mid-turn, and only a pre-armed wakeup restarts it.
 3. Tell me the override is active and when it expires, in the same turn you activate it.
-4. Never renew or re-create the flag without a fresh explicit request from me. One authorization covers one window; when it expires, the default rule is back.
-5. Explicit means explicit: a generic "keep going" about the task, impatience, or an old authorization from a previous window is **not** a budget override. When in doubt, follow the default rule.
-6. If I say to stop overriding, `rm -f ~/.claude/usage-override` and return to the default rule immediately.
+4. **Delete the flag the moment the authorized task is done** — `rm -f ~/.claude/usage-override-$CLAUDE_CODE_SESSION_ID`. The override is scoped to the specific task I authorized, not the whole window: as soon as you finish it, remove the flag so the default stop protects any *further* work in this session. Two backstops cover the file if you forget: the hook deletes it automatically once its epoch passes (at the latest, at window reset), and it dies with the machine's `~/.claude` regardless.
+5. Never renew or re-create the flag without a fresh explicit request from me. One authorization covers one task in one window; when it expires or the task ends, the default rule is back.
+6. Explicit means explicit: a generic "keep going" about the task, impatience, or an old authorization from a previous task/window is **not** a budget override. When in doubt, follow the default rule.
+7. If I say to stop overriding, `rm -f ~/.claude/usage-override-$CLAUDE_CODE_SESSION_ID` and return to the default rule immediately. (A deliberate *all-sessions* switch is possible by writing the suffix-less `~/.claude/usage-override`, but only create that on an explicit request to override every session at once.)
 
 ## Dead-man's switch
 
