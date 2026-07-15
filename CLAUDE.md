@@ -100,7 +100,17 @@ The snapshot is the hook's data source, not something you watch. Read it directl
 2. Enter the Auto-resume loop below, arming the wakeup off the tripped window's `.resets_at` (read it from the snapshot).
 3. Tell me which window tripped and its percentage, and announce the wakeup (rule below).
 
+This is the default; an explicit user override lifts it (below).
+
 The ≥90% heads-up is your runway: finish the current step, don't start a heavy new chunk, don't pause yet.
+
+**User override — "continue regardless of usage".** The 95% stop is the default, not a hard wall. If I **explicitly** say to keep working despite the usage limit ("continue regardless of usage", "ignore the budget stop", "override the limit", or equivalent), that is authorization to continue. Then:
+1. Activate the override so the hook stops injecting stop directives — write the **tripped window's** reset epoch to the flag file: `jq -r '.five_hour.resets_at' ~/.claude/usage-snapshot.json > ~/.claude/usage-override` (use `.seven_day.resets_at` if the weekly window tripped). While that file holds a future epoch, the hook downgrades its ⛔ stop to a one-line 🔓 reminder and suppresses the ≥90% heads-up; once expired, the hook deletes the file and the default stop behavior returns on its own.
+2. Keep working — but keep exactly one dead-man's-switch `ScheduleWakeup` armed the entire time. The override silences the **hook**, not the **hard limit**: a hard trip can still lock the session mid-turn, and only a pre-armed wakeup restarts it.
+3. Tell me the override is active and when it expires, in the same turn you activate it.
+4. Never renew or re-create the flag without a fresh explicit request from me. One authorization covers one window; when it expires, the default rule is back.
+5. Explicit means explicit: a generic "keep going" about the task, impatience, or an old authorization from a previous window is **not** a budget override. When in doubt, follow the default rule.
+6. If I say to stop overriding, `rm -f ~/.claude/usage-override` and return to the default rule immediately.
 
 **Dead-man's switch.** A hard trip mid-turn locks the session, and only a `ScheduleWakeup` armed *beforehand* can restart it. So keep exactly one armed:
 
