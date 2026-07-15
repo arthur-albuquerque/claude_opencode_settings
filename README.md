@@ -82,9 +82,11 @@ by copying files (Setup below), or use the plugin from `framework-as-skill` inst
   tool-using turn once a window crosses 90% (heads-up) / 95% (stop directive). The agent never
   polls; the warning comes to it, so the pause no longer depends on the agent remembering to
   check. The stop is a default, not a hard wall: on an explicit user request to continue
-  regardless of usage, the agent writes the tripped window's reset epoch to
-  `~/.claude/usage-override` and the hook downgrades the stop to a one-line reminder until that
-  epoch passes (then deletes the file and restores the default). A proactively-armed dead-man's-switch `ScheduleWakeup` backstops the one case the hook
+  regardless of usage, the agent writes the tripped window's reset epoch to a **per-session** flag
+  `~/.claude/usage-override-<session_id>` and the hook downgrades the stop to a one-line reminder
+  for **that session only** — other sessions stay stopped even though the account-wide limit trips
+  them all at once. The agent removes the flag when the authorized task finishes; the hook also
+  self-deletes it once its epoch passes, restoring the default. A proactively-armed dead-man's-switch `ScheduleWakeup` backstops the one case the hook
   can't catch — a hard trip mid-turn on a lagging snapshot. Every `ScheduleWakeup` is also
   announced: `hooks/announce-wakeup.sh` fires after the call and injects a directive (with the
   computed wall-clock fire time) forcing the agent to tell the user that a wakeup is armed, when
@@ -159,12 +161,15 @@ by copying files (Setup below), or use the plugin from `framework-as-skill` inst
    ```
 
    The hook is silent below 90%; at ≥90% it injects a heads-up and at ≥95% a stop directive that
-   quotes the pause procedure. If `~/.claude/usage-override` holds a future unix epoch (written by
-   the agent only on an explicit user request to continue past the limit — see CLAUDE.md "User
-   override"), the stop is downgraded to a one-line reminder and the heads-up is suppressed; the
-   hook deletes the file once the epoch passes. It reads only the snapshot and the override file
-   (no API calls). Test it before wiring:
-   `printf '{"hook_event_name":"PostToolUse"}' | CLAUDE_USAGE_SNAPSHOT=<fixture.json> CLAUDE_USAGE_OVERRIDE=<flagfile> ~/.claude/hooks/usage-warning.sh`.
+   quotes the pause procedure. If the firing session's `~/.claude/usage-override-<session_id>` holds
+   a future unix epoch (written by the agent only on an explicit user request to continue past the
+   limit — see CLAUDE.md "User override"), that session's stop is downgraded to a one-line reminder
+   and its heads-up is suppressed; other sessions are unaffected. A suffix-less
+   `~/.claude/usage-override` is honored as a deliberate all-sessions switch. The hook deletes any
+   override file once its epoch passes. It reads only the snapshot and the override file (no API
+   calls). Test it before wiring (`CLAUDE_OVERRIDE_DIR` sets where override files live,
+   `CLAUDE_CODE_SESSION_ID` sets the session id):
+   `printf '{"hook_event_name":"PostToolUse","session_id":"s1"}' | CLAUDE_USAGE_SNAPSHOT=<fixture.json> CLAUDE_OVERRIDE_DIR=<dir> CLAUDE_CODE_SESSION_ID=s1 ~/.claude/hooks/usage-warning.sh`.
 5. Copy `scripts/opencode-go-usage.py` to `~/.claude/scripts/`.
 6. Merge the `agent.worker` block from `opencode.worker-agent.example.json` into your
    `~/.config/opencode/opencode.json`. Without it, `opencode run` auto-rejects file edits and
