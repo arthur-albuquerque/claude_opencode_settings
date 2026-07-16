@@ -1,6 +1,6 @@
 ---
 name: delegate-workflow
-description: Workflow-tier delegation — run a batch of 3+ independent opencode worker tasks through a deterministic ultracode Workflow (cost-weighted concurrency, model-ladder retries, per-task QA, budget-resumable). Use when a delegation job decomposes into 3+ independent, non-overlapping coding tasks — migrations, test backfills, multi-module features, overnight runs. For 1–2 tasks, use direct delegation from the coordinator doctrine instead; this tier's wrapper overhead is pure surcharge there.
+description: Workflow-tier delegation — run a batch of 3+ independent opencode worker tasks through a deterministic ultracode Workflow (tier-capped concurrency, model-ladder retries, per-task QA, budget-resumable). Use when a delegation job decomposes into 3+ independent, non-overlapping coding tasks — migrations, test backfills, multi-module features, overnight runs. For 1–2 tasks, use direct delegation from the coordinator doctrine instead; this tier's wrapper overhead is pure surcharge there.
 ---
 
 # delegate-workflow — Workflow tier for opencode delegation
@@ -35,7 +35,7 @@ Also verified: changed git worktrees persist after the Workflow returns, so your
    - `risk: "high"` if the task touches auth/security/payments, shared interfaces, or logic with no test coverage — high-risk tasks start at `kimi-k2.7-code` minimum and get 2-lens adversarial QA.
    - Tasks must be file-disjoint. Two tasks needing the same file = one task.
    - `long: true` for tasks likely to exceed ~8 minutes of worker time (big diffs, kimi/glm reasoning runs) — this switches the wrapper to the detached launch pattern.
-3. **Verify the gates on the base tree:** run every gate command (build, typecheck, test, lint — detect from package.json/Makefile/CI) at the repo root and require green before launching. A gate that fails on the base tree poisons every QA cycle. No test command → say so loudly and ask whether to proceed.
+3. **Verify the gates on the base tree:** run every gate command (build, typecheck, test, lint — detect from package.json/Makefile/CI) at the repo root and require green before launching. A gate that fails on the base tree poisons every QA cycle. No test command → say so loudly and ask whether to proceed. While here, size `concurrency.maxWorkers`: 6 for light gates; for heavy gates (full test suite, build) pass `min(6, max(2, floor(ncpu/2)))` using `sysctl -n hw.ncpu`.
 4. **Show the task table** (id · description · files · model · risk · acceptance) in your message as you launch — the user must be able to see what was dispatched, but you don't wait for a yes. Installing this skill is their standing opt-in.
 5. Arm the dead-man's-switch `ScheduleWakeup` per the doctrine — the Workflow is a background job in flight.
 
@@ -48,7 +48,7 @@ export const meta = {
   name: 'delegate-workflow-run',
   description: 'Opencode workers implement tasks in isolated worktrees; ladder retries + per-task QA',
   phases: [
-    { title: 'Implement', detail: 'opencode workers code in worktrees, cost-weighted concurrency' },
+    { title: 'Implement', detail: 'opencode workers code in worktrees, tier-capped concurrency' },
     { title: 'QA', detail: 'diff-traceability review; high-risk: 2-lens adversarial' },
   ],
 }
@@ -60,11 +60,12 @@ const cfg = typeof args === 'string' ? JSON.parse(args) : args
 //   gates: [{name:'test', cmd:'npm test'}, ...],
 //   ladder: ['deepseek-v4-flash','deepseek-v4-pro','kimi-k2.7-code','glm-5.2'],  // doctrine's escalation ladder
 //   concurrency: {
-//     budget: 8,        // max sum of in-flight model weights — spend-RATE cap, not a worker count
-//     maxWorkers: 6,    // hard count cap for machine load (parallel gate runs); heavy test suites → 3-4
-//     weights: { 'deepseek-v4-flash':1, 'mimo-v2.5':1, 'deepseek-v4-pro':2, 'minimax-m3':2,
-//                'qwen3.7-plus':2, 'mimo-v2.5-pro':2, 'kimi-k2.7-code':3, 'glm-5.2':4 },
-//   },  // weights ≈ inverse of the model table's cost column: budget 8 ≈ 8 flash, ~3 kimi, or 2 glm at once
+//     maxWorkers: 6,    // machine cap (parallel gate runs); heavy gates → pass min(6, max(2, floor(ncpu/2))) from Phase 0
+//     tierOf: { 'deepseek-v4-flash':'cheap', 'mimo-v2.5':'cheap',
+//               'deepseek-v4-pro':'mid', 'minimax-m3':'mid', 'qwen3.7-plus':'mid', 'mimo-v2.5-pro':'mid',
+//               'kimi-k2.7-code':'expensive', 'glm-5.2':'expensive' },
+//     tierCap: { cheap: 6, mid: 4, expensive: 2 },   // bounds unmonitored in-flight exposure, not spend rate
+//   },
 //   tasks: [{id, description, files:[], model, risk, acceptance, prompt, long}],
 // }
 
@@ -74,8 +75,10 @@ const IMPL_SCHEMA = { type:'object', properties:{
   session_id:{type:'string'},                                  // opencode sessionID, '' if not captured
   files_changed:{type:'array',items:{type:'string'}},
   gate_results:{type:'array',items:{type:'object',properties:{name:{type:'string'},pass:{type:'boolean'},detail:{type:'string'}},required:['name','pass']}},
+  requests:{type:'number'},                                    // JSON events in the worker output, 0 if uncountable
+  started_at:{type:'number'}, sec:{type:'number'},             // wrapper-measured wall clock (date +%s) — the script can't call Date.now()
   summary:{type:'string'}, concerns:{type:'array',items:{type:'string'}},
-}, required:['status','worktree','branch','session_id','files_changed','gate_results','summary','concerns'] }
+}, required:['status','worktree','branch','session_id','requests','started_at','sec','files_changed','gate_results','summary','concerns'] }
 
 const REVIEW_SCHEMA  = { type:'object', properties:{ approve:{type:'boolean'}, issues:{type:'array',items:{type:'string'}} }, required:['approve','issues'] }
 const VERDICT_SCHEMA = { type:'object', properties:{ refuted:{type:'boolean'}, reasons:{type:'array',items:{type:'string'}} }, required:['refuted','reasons'] }
@@ -99,7 +102,7 @@ const launchBlock = (t, model, promptFile, sessionId) => {
 
 const implPrompt = (t, model, attempt, feedback, sessionId) => `You are a THIN WRAPPER around an opencode CLI worker. You never write or fix feature code — your only writes are the prompt file and the housekeeping named below. Repo: ${cfg.repo} · Task: ${t.id} — ${t.description} · Attempt ${attempt} · Worker model: ${model}
 
-0. Budget probe (free): python3 ~/.claude/scripts/opencode-go-usage.py — exit 2 means the gateway is blocked: return status "blocked" with the probe's window + reset_in_sec in summary and skip every later step.
+0. Record the start time: run date +%s and remember it as started_at. Then the budget probe (free): python3 ~/.claude/scripts/opencode-go-usage.py — exit 2 means the gateway is blocked: return status "blocked" with the probe's window + reset_in_sec in summary and skip every later step.
 1. Worktree: if ${wt(t)} does not exist: cd ${cfg.repo} && git worktree add ${wt(t)} -b ${br(t)} ${cfg.baseBranch} (branch exists from a prior attempt → git worktree add ${wt(t)} ${br(t)}). If it exists, use as-is.
 2. Write this VERBATIM to ${cfg.scratchDir}/dw-${t.id}-prompt.md:
 ---PROMPT START---
@@ -113,7 +116,7 @@ ${launchBlock(t, model, `${cfg.scratchDir}/dw-${t.id}-prompt.md`, sessionId)}
 5. Run each gate inside ${wt(t)}, record pass/fail + one-line detail:
    ${gateList}
 6. Housekeeping: rm -f ${wt(t)}/.dw-done; cd ${wt(t)} && git add -A && git commit -m "delegate-workflow: ${t.id} attempt ${attempt}" (commit even if gates failed — the diff must stay inspectable).
-7. Return JSON per schema. status "ok" ONLY if the worker completed AND every gate passed — never fix gate failures yourself; report them. List files touched outside ${JSON.stringify(t.files)} in concerns. worktree must be the absolute ${wt(t)}.`
+7. Return JSON per schema. status "ok" ONLY if the worker completed AND every gate passed — never fix gate failures yourself; report them. List files touched outside ${JSON.stringify(t.files)} in concerns. worktree must be the absolute ${wt(t)}. requests = the number of JSON event lines in the worker output/log (0 if you cannot count them). started_at = the epoch from step 0; sec = (date +%s now) minus started_at.`
 
 const reviewPrompt = (t, impl) => `Review opencode worker output. cd ${impl.worktree} && git diff ${cfg.baseBranch}...${impl.branch}. Task: ${t.description}. Acceptance: ${t.acceptance}.
 Check: (1) acceptance actually met — run the verification command yourself, don't trust the wrapper; (2) every changed line traces to the task prompt — no scope creep beyond ${JSON.stringify(t.files)}, no drive-by cleanup; (3) project convention conformance; (4) no silently swallowed errors; (5) tests verify intent, not hardcoded outputs. approve=false with concrete, actionable issues if anything fails.`
@@ -123,20 +126,29 @@ const LENSES = ['correctness (logic errors, unmet acceptance, broken edge cases)
 
 let blocked = false, blockInfo = ''
 
-// Cost-weighted concurrency: parallelism is metered in Go-spend-rate units, not worker count.
-// Cheap models fan wide, expensive models stay narrow, and ladder escalation onto a pricier
-// model automatically narrows the fan. QA agents run OUTSIDE this semaphore — they cost
-// Claude tokens, not Go tokens, so reviews of one task overlap implementation of the next.
-let usedWeight = 0, inFlight = 0
+// Concurrency = machine cap + per-tier caps. Blast-radius and machine-load control, NOT
+// spend pacing: parallelism doesn't change what a batch costs against the Go wallet, only
+// how much unmonitored in-flight work a gateway block strands (the probe fires per-launch,
+// so a long expensive run flies blind in between). The real budget control is the probe +
+// freeze-on-block + defer/resumeFromRunId path. Ladder escalation onto a pricier model
+// still narrows the fan (the expensive tier queues 2-wide). QA agents run OUTSIDE this
+// semaphore — they cost Claude tokens, not Go tokens, so reviews of one task overlap
+// implementation of the next.
+let inFlight = 0
+const tierCount = { cheap: 0, mid: 0, expensive: 0 }
 const waiters = []
-const weightOf = m => cfg.concurrency.weights[m] ?? 2
-async function acquire(w) {
-  while (!blocked && (usedWeight + w > cfg.concurrency.budget || inFlight >= cfg.concurrency.maxWorkers))
+const tierOf = m => cfg.concurrency.tierOf[m] ?? 'mid'
+async function acquire(model) {
+  const tier = tierOf(model)
+  while (!blocked && (inFlight >= cfg.concurrency.maxWorkers || tierCount[tier] >= cfg.concurrency.tierCap[tier]))
     await new Promise(r => waiters.push(r))
   if (blocked) return false
-  usedWeight += w; inFlight += 1; return true
+  inFlight += 1; tierCount[tier] += 1; return true
 }
-function release(w) { usedWeight -= w; inFlight -= 1; waiters.splice(0).forEach(r => r()) }
+function release(model) { inFlight -= 1; tierCount[tierOf(model)] -= 1; waiters.splice(0).forEach(r => r()) }
+
+// Calibration metrics — one row per attempt, returned to the coordinator for the runlog.
+const metrics = []
 
 async function implement(t, model, attempt, feedback, sessionId) {
   return agent(implPrompt(t, model, attempt, feedback, sessionId),
@@ -162,11 +174,13 @@ async function runTask(t) {
     const tries = model === t.model ? 2 : 1          // 2 on the routed model, 1 per escalation step
     for (let n = 0; n < tries; n++) {
       attempt++
-      const w = weightOf(model)
-      if (!(await acquire(w))) return { task: t.id, deferred: true, feedback }
+      if (!(await acquire(model))) return { task: t.id, deferred: true, feedback }
       let impl
       try { impl = await implement(t, model, attempt, feedback, model === lastModel ? sessionId : null) }
-      finally { release(w) }
+      finally { release(model) }
+      // Date.now() throws inside Workflow scripts — timing comes from the wrapper's date +%s.
+      metrics.push({ ts: impl?.started_at ?? 0, task: t.id, model, attempt, sec: impl?.sec ?? 0,
+                     requests: impl?.requests ?? 0, status: impl?.status ?? 'wrapper_died' })
       lastModel = model
       if (!impl) { feedback = [...feedback, `attempt ${attempt} (${model}): wrapper agent died`]; continue }
       if (impl.session_id) sessionId = impl.session_id
@@ -190,13 +204,13 @@ return {
   approved: results.filter(r => r.impl),
   failed:   results.filter(r => r.failed).map(r => ({ task: r.task, feedback: r.feedback })),
   deferred: results.filter(r => r.deferred).map(r => r.task),
-  blocked, blockInfo,
+  blocked, blockInfo, metrics,
 }
 ```
 
 Notes on the template:
-- **The semaphore is the worker cap, in spend-rate units, not worker count.** Rationale: parallelism doesn't change the *total* Go tokens a batch costs — only how fast they burn and how many workers are stranded mid-run if the gateway blocks. What the doctrine's old "≤3 workers" wave rule was really protecting was cost-rate (plus your review bandwidth, which this tier delegates), so the cap meters exactly that: each in-flight worker holds its model's weight (≈ inverse of the table's cost column) against `budget`. Eight flash workers burn roughly like two glm workers, so both are legal; escalation retries automatically narrow the fan as the ladder climbs. Per-launch probes (wrapper step 0, free) plus the freeze-on-block rule bound the stranded-work blast radius to workers already in flight.
-- **Tuning:** `budget: 8` is the default spend-rate ceiling — raise it only deliberately for a nearly-all-flash batch, lower it near the end of a Go window. `maxWorkers` protects the machine, not the budget: parallel gate runs (full test suites) are CPU-bound, so drop it to 3–4 when gates are heavy. Never bypass the semaphore by fanning `agent()` calls directly — the Workflow's own concurrency cap (~16) would stampede the Go window.
+- **The semaphore is a machine cap plus per-tier caps — blast-radius control, not spend pacing.** Parallelism doesn't change the *total* Go tokens a batch costs, only how fast they burn and how much unmonitored in-flight work a gateway block strands: the free probe fires only at launch, so a long kimi/glm run flies blind between probes. The caps bound exactly that — `maxWorkers` protects the machine (parallel gate runs are CPU-bound), `tierCap` bounds concurrent unmonitored exposure per model tier (cheap fans to the machine cap, expensive queues 2-wide), and ladder escalation narrows the fan automatically. The actual budget control is the per-launch probe + freeze-on-block + defer/`resumeFromRunId` — the caps are subordinate to it, not a substitute.
+- **Tuning:** `maxWorkers: 6` assumes light gates; when gates are heavy (full test suites, builds), pass `min(6, max(2, floor(ncpu/2)))` computed in Phase 0. Drop `tierCap.expensive` to 1 if the runlog ever shows a block landing shortly after two expensive launches. Never bypass the semaphore by fanning `agent()` calls directly — the Workflow's own concurrency cap (~16) would stampede the Go window.
 - Same-model retries reuse the opencode session (`-s`) so feedback attempts don't resend full context; escalation to a new model starts a fresh session with the accumulated feedback embedded in the prompt file.
 - Worktrees are managed manually (deterministic path per task, shared across attempts) rather than via `isolation:'worktree'`, because retries and `-s` session reuse need attempt N+1 to see attempt N's tree.
 - A `blocked` wrapper freezes all launches: waiting tasks return as `deferred`, never silently dropped.
@@ -206,7 +220,7 @@ Notes on the template:
 1. **Deferred tasks (budget block):** report the window + numbers, then enter the doctrine's auto-resume loop with `delaySeconds` from the probe's `reset_in_sec`. On the wake after reset, relaunch with `Workflow({scriptPath, resumeFromRunId})` — completed tasks replay from cache; only deferred ones run.
 2. **Final review — the doctrine's QA loop, unreduced:** for every approved result, `cd` the worktree, read `git diff <baseBranch>...<branch>` yourself (every changed line traces to the task prompt), and run the verification command yourself. The Workflow's reviewers are a filter, not a substitute — you own the result.
 3. **Merge sequentially,** one approved task at a time, from a clean main tree: `git merge --squash <branch>` → run EVERY gate → commit with your own message. A post-merge gate failure stops the line: revert, re-enter that task alone (one-task Workflow seeded with the failure as feedback, or fix it yourself), continue with the rest.
-4. **Report:** task · worker model · attempts · QA verdict · files; then loudly: failed/tombstoned tasks, deferred tasks, anything you fixed yourself. Token accounting: the Workflow completion notification's `subagent_tokens` = Claude plumbing cost; the coding itself ran on Go tokens (unmetered — say so, don't guess a number).
+4. **Report:** task · worker model · attempts · QA verdict · files; then loudly: failed/tombstoned tasks, deferred tasks, anything you fixed yourself. Token accounting: the Workflow completion notification's `subagent_tokens` = Claude plumbing cost; the coding itself ran on Go tokens (unmetered — say so, don't guess a number). Then append the run's calibration data to `~/.claude/opencode-go-runlog.jsonl`, one JSON object per line: every row from the Workflow's returned `metrics` array, plus one `{ts, event:'block', window, reset_in_sec}` row per gateway block (from `blockInfo`/probe output). This log is the only path to real per-model drain numbers — after ~10 batches it answers whether blocks are common enough to justify anything smarter than the static tier caps.
 5. **Cleanup sweep — only after the report:** `git worktree list` and `git branch --list 'delegate-workflow/*'`; remove every `<repoName>-dw-*` worktree and `delegate-workflow/*` branch, failed tasks included.
 
 ## Failure handling
