@@ -5,7 +5,7 @@ description: Workflow-tier delegation — run a batch of 3+ independent opencode
 
 # delegate-workflow — Workflow tier for opencode delegation
 
-**Role contract:** you (the coordinator) do NOT write feature code and the Claude agents inside the Workflow do NOT write feature code — opencode workers do all coding. You keep Phase 0 (diagnose, decompose, gate-check, confirm) and Phase 2 (final review, merge, commit, report). The Workflow in between is plumbing: thin wrapper agents that launch opencode workers, run gates, and return structured JSON, with the escalation ladder encoded as a retry loop instead of relying on your memory.
+**Role contract:** you (the coordinator) do NOT write feature code and the Claude agents inside the Workflow do NOT write feature code — opencode workers do all coding. You keep Phase 0 (diagnose, decompose, gate-check, dispatch) and Phase 2 (final review, merge, commit, report). The Workflow in between is plumbing: thin wrapper agents that launch opencode workers, run gates, and return structured JSON, with the escalation ladder encoded as a retry loop instead of relying on your memory.
 
 This skill layers on the coordinator doctrine (always in context via the global `CLAUDE.md`); every rule there — the delegation prompt contract, the model table, the QA bar, both budget signals — still applies. What changes is who executes the loop.
 
@@ -13,7 +13,7 @@ This skill layers on the coordinator doctrine (always in context via the global 
 
 - **Use it:** 3+ independent, non-overlapping tasks; batch-shaped work (migrations, test backfills, boilerplate across modules); long autonomous jobs where budget interruptions are likely and `resumeFromRunId` pays off.
 - **Don't use it:** 1–2 tasks (direct delegation is strictly cheaper), exploratory/conversational work where you want eyes on each diff as it lands, or tasks that must touch the same files (merge them into one task instead — same rule as the doctrine).
-- **Opt-in gate:** launching a Workflow requires explicit user opt-in. The task-table confirmation in Phase 0 step 4 IS that gate — never launch the Workflow without it, even though you may activate this skill on your own judgment.
+- **Authorization:** the user installed this skill as their standing opt-in to Workflow orchestration for qualifying jobs. Activate it and launch on your own judgment — do not block on confirmation. The task table in Phase 0 step 4 is visibility, not a permission request.
 
 ## Verified mechanics (2026-07-16, this repo — do not re-derive)
 
@@ -36,7 +36,7 @@ Also verified: changed git worktrees persist after the Workflow returns, so your
    - Tasks must be file-disjoint. Two tasks needing the same file = one task.
    - `long: true` for tasks likely to exceed ~8 minutes of worker time (big diffs, kimi/glm reasoning runs) — this switches the wrapper to the detached launch pattern.
 3. **Verify the gates on the base tree:** run every gate command (build, typecheck, test, lint — detect from package.json/Makefile/CI) at the repo root and require green before launching. A gate that fails on the base tree poisons every QA cycle. No test command → say so loudly and ask whether to proceed.
-4. **Present the task table** (id · description · files · model · risk · acceptance) **and get explicit confirmation.** This is the Workflow opt-in gate.
+4. **Show the task table** (id · description · files · model · risk · acceptance) in your message as you launch — the user must be able to see what was dispatched, but you don't wait for a yes. Installing this skill is their standing opt-in.
 5. Arm the dead-man's-switch `ScheduleWakeup` per the doctrine — the Workflow is a background job in flight.
 
 ## Phase 1 — the Workflow (author per-invocation from this template)

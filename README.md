@@ -25,8 +25,9 @@ for multi-task jobs. A model-invocable skill, `skills/delegate-workflow/SKILL.md
 coordinator route batches of **3+ independent, non-overlapping tasks** through a deterministic
 ultracode Workflow: ≤3 capped opencode worker lanes, the escalation ladder encoded as a retry loop,
 per-task QA by cheap Claude agents, and budget-interrupted runs that resume from cache
-(`resumeFromRunId`). The coordinator keeps decomposition and final review; the skill's task-table
-confirmation doubles as the Workflow opt-in gate, so nothing launches without your explicit yes.
+(`resumeFromRunId`). The coordinator keeps decomposition and final review, and launches
+autonomously — installing the skill is your standing opt-in; the agent shows you the dispatched
+task table for visibility rather than asking permission.
 
 The skill lives outside `CLAUDE.md` because that's the only placement that works: Claude Code's
 Workflow tool requires explicit opt-in, which a skill invocation can carry but global-instructions
@@ -37,7 +38,7 @@ qualifying job appears.
 |---------|----------|--------------------------------|----------------------|
 | **Claude-usage-limit pacing** — dead-man's switch, auto-resume loop | In `CLAUDE.md` | In `CLAUDE.md` | In `CLAUDE.md` — always-on everywhere |
 | **Coordinator/worker delegation** — the split, model table, prompt contract, QA loop, worker budget | In `CLAUDE.md` — always loaded | In `CLAUDE.md` — always loaded | In `skills/delegate/SKILL.md`, **user-invoked** (`disable-model-invocation: true`) |
-| **Workflow tier** — multi-task orchestration via ultracode Workflows | — | `skills/delegate-workflow/SKILL.md`, **model-invocable** (agent proposes, you confirm) | — |
+| **Workflow tier** — multi-task orchestration via ultracode Workflows | — | `skills/delegate-workflow/SKILL.md`, **model-invocable** (agent invokes autonomously) | — |
 
 Pick `global` for the simplest install with direct delegation only. Pick **this branch** if you
 also run batch-shaped or overnight jobs where deterministic retries and budget-resumable runs pay
@@ -90,7 +91,8 @@ this branch by copying files (Setup below), or use the plugin from `framework-as
   opencode session reuse (`-s`) on feedback attempts, cheap reviewer agents do first-pass QA, and a
   mid-run budget block freezes the lanes and resumes later from cache (`resumeFromRunId`) instead
   of losing completed work. The coordinator still decomposes up front and reviews/merges at the
-  end; launching always requires the user's explicit confirmation of the task table. The skill's
+  end, and invokes the tier autonomously whenever a job qualifies — installing the skill is the
+  standing authorization; the dispatched task table is reported, not proposed. The skill's
   wrapper prompts encode empirically verified harness mechanics (no background-and-wait inside
   workflow agents; detached `nohup` launch + `$SECONDS`-bounded waits for runs past the 10-minute
   foreground Bash cap; no `timeout` binary on macOS).
