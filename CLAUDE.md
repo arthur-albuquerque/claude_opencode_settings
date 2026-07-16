@@ -54,7 +54,7 @@ opencode run --pure --agent worker -m opencode-go/<model> "Read the file /tmp/<t
 - Launch **every** worker with `run_in_background: true` and **no `timeout`** — worker runs take minutes and foreground Bash caps at 10 min, which kills a run mid-edit. The harness notifies you when each run exits; review each result as it lands. If a worker looks hung, inspect and kill it deliberately — never rely on a timer to reap it. Don't run two workers over overlapping files.
 - **Iterating on a worker's output:** don't re-send full context. Capture the session at launch with `--format json` (first event has `sessionID`), or for a single sequential worker just use `-c` (continue latest session). Then: `opencode run --pure --agent worker -s <sessionID> "Review failed because X. Fix by Y."`
 - `--variant high|max` raises reasoning effort on models that support it (e.g. kimi-k2.7-code) — use for the hard tier only.
-- For big multi-task jobs wanting isolated worktrees + orchestration, `/ultraswarm` exists — but restrict its workers to opencode models.
+- Jobs of **3+ independent, non-overlapping tasks** (migrations, test backfills, multi-module features, overnight runs): invoke the `delegate-workflow` skill. It runs the batch through an ultracode Workflow — ≤3 capped worker lanes, the escalation ladder encoded as a retry loop, per-task QA by cheap Claude agents, budget-resumable via `resumeFromRunId` — while you keep decomposition and final review. For 1–2 tasks, delegate directly as above; the workflow tier's wrapper overhead is pure surcharge there.
 - Claude-side subagents (Explore, etc.) are fine for codebase search that feeds your own reasoning; anything that *writes code* goes to opencode.
 
 ## Delegation prompt contract

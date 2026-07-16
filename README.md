@@ -17,25 +17,32 @@ the same session.
 The goal: long, productive Claude sessions that don't burn through usage limits, because the bulk
 token spend (writing code) happens on a flat-rate $12/5h worker plan instead of on Claude.
 
-## How this branch differs from `framework-as-skill`
+## How this branch differs from `global` and `framework-as-skill`
 
-This is the `global` branch, where the **entire** framework lives in the global `~/.claude/CLAUDE.md`.
-Every Claude session — even one where you never intend to delegate — loads the whole system prompt:
-the coordinator/worker rules, the model table, the delegation contract, the QA loop, *and* the
-budget pacing. It's one file, always in context, nothing to invoke.
+This is the `global-workflow` branch: the `global` architecture — the **entire** framework lives in
+the global `~/.claude/CLAUDE.md`, always in context, nothing to invoke — **plus a workflow tier**
+for multi-task jobs. A model-invocable skill, `skills/delegate-workflow/SKILL.md`, lets the
+coordinator route batches of **3+ independent, non-overlapping tasks** through a deterministic
+ultracode Workflow: ≤3 capped opencode worker lanes, the escalation ladder encoded as a retry loop,
+per-task QA by cheap Claude agents, and budget-interrupted runs that resume from cache
+(`resumeFromRunId`). The coordinator keeps decomposition and final review; the skill's task-table
+confirmation doubles as the Workflow opt-in gate, so nothing launches without your explicit yes.
 
-The [`framework-as-skill`](https://github.com/arthur-albuquerque/claude_opencode_settings/tree/framework-as-skill)
-branch **splits the framework by scope** so nothing is forced on a session that doesn't need it:
+The skill lives outside `CLAUDE.md` because that's the only placement that works: Claude Code's
+Workflow tool requires explicit opt-in, which a skill invocation can carry but global-instructions
+prose cannot. `CLAUDE.md` holds a one-bullet pointer to the skill; the machinery loads only when a
+qualifying job appears.
 
-| Concern | `global` (this branch) | `framework-as-skill` |
-|---------|----------------------|----------------------|
-| **Claude-usage-limit pacing** — dead-man's switch, auto-resume loop | In `CLAUDE.md` | In `CLAUDE.md` — stays always-on either way |
-| **Coordinator/worker delegation** — the split, model table, prompt contract, QA loop, OpenCode worker budget, viz default | In `CLAUDE.md` — always loaded | Moved to `skills/delegate/SKILL.md`, a **user-invoked skill** (`disable-model-invocation: true`) loaded only when you type `delegate` |
+| Concern | `global` | `global-workflow` (this branch) | `framework-as-skill` |
+|---------|----------|--------------------------------|----------------------|
+| **Claude-usage-limit pacing** — dead-man's switch, auto-resume loop | In `CLAUDE.md` | In `CLAUDE.md` | In `CLAUDE.md` — always-on everywhere |
+| **Coordinator/worker delegation** — the split, model table, prompt contract, QA loop, worker budget | In `CLAUDE.md` — always loaded | In `CLAUDE.md` — always loaded | In `skills/delegate/SKILL.md`, **user-invoked** (`disable-model-invocation: true`) |
+| **Workflow tier** — multi-task orchestration via ultracode Workflows | — | `skills/delegate-workflow/SKILL.md`, **model-invocable** (agent proposes, you confirm) | — |
 
-Pick this branch if you want the simplest install (one `CLAUDE.md`, no skill to copy, no plugin
-machinery) and you're fine paying the delegation framework's context cost on every session. Pick
-`framework-as-skill` if you want plain, non-delegating sessions to pay **zero** context load for
-the coordinator/worker rules and to opt into them on demand.
+Pick `global` for the simplest install with direct delegation only. Pick **this branch** if you
+also run batch-shaped or overnight jobs where deterministic retries and budget-resumable runs pay
+for themselves. Pick `framework-as-skill` if you want plain, non-delegating sessions to pay
+**zero** context load for the coordinator/worker rules and to opt into them on demand.
 
 `framework-as-skill` is also packaged as a **Claude Code plugin** (`opencode-coordinator`) and is
 the repo's **default branch**, so the plugin installs directly from GitHub:
@@ -45,15 +52,16 @@ the repo's **default branch**, so the plugin installs directly from GitHub:
 /plugin install opencode-coordinator@claude-opencode-settings
 ```
 
-This `global` branch deliberately stays plugin-free — a second plugin carrying the same hooks and
-doctrine would double-inject warnings and context if both were ever enabled. Install this branch
-by copying files (Setup below), or use the plugin from `framework-as-skill` instead.
+This `global-workflow` branch deliberately stays plugin-free — a second plugin carrying the same
+hooks and doctrine would double-inject warnings and context if both were ever enabled. Install
+this branch by copying files (Setup below), or use the plugin from `framework-as-skill` instead.
 
 ## What's in here
 
 | File | Installs to | Purpose |
 |------|-------------|---------|
 | `CLAUDE.md` | `~/.claude/CLAUDE.md` | The whole system prompt: delegation rules, model table, budget pacing, auto-resume |
+| `skills/delegate-workflow/` | `~/.claude/skills/delegate-workflow/` | Workflow tier: orchestrates 3+ independent tasks through an ultracode Workflow (capped lanes, ladder retries, per-task QA, budget resume) |
 | `statusline-command.sh` | `~/.claude/statusline-command.sh` | Claude Code status line script that persists `~/.claude/usage-snapshot.json` |
 | `hooks/usage-warning.sh` | `~/.claude/hooks/usage-warning.sh` | Hook that auto-injects a budget warning into the agent's context at ≥90% / ≥95% of a Claude usage window |
 | `hooks/announce-wakeup.sh` | `~/.claude/hooks/announce-wakeup.sh` | Hook that fires after every `ScheduleWakeup` call and forces the agent to tell the user — in that turn's final message — that a wakeup is armed, when exactly it fires, why, and what happens on wake |
@@ -75,6 +83,17 @@ by copying files (Setup below), or use the plugin from `framework-as-skill` inst
 - **Non-negotiable QA loop.** After every worker run: read the actual `git diff`, re-run the
   verification command yourself, re-delegate up the ladder or fix residuals directly. The
   coordinator owns commits and everything user-visible.
+- **Workflow tier for multi-task jobs.** For 3+ independent, non-overlapping tasks, the
+  model-invocable `delegate-workflow` skill hands orchestration to a deterministic ultracode
+  Workflow: thin haiku-pinned wrapper agents launch the opencode workers in isolated git worktrees
+  (≤3 lanes, matching the Go-budget wave cap), the escalation ladder runs as a retry loop with
+  opencode session reuse (`-s`) on feedback attempts, cheap reviewer agents do first-pass QA, and a
+  mid-run budget block freezes the lanes and resumes later from cache (`resumeFromRunId`) instead
+  of losing completed work. The coordinator still decomposes up front and reviews/merges at the
+  end; launching always requires the user's explicit confirmation of the task table. The skill's
+  wrapper prompts encode empirically verified harness mechanics (no background-and-wait inside
+  workflow agents; detached `nohup` launch + `$SECONDS`-bounded waits for runs past the 10-minute
+  foreground Bash cap; no `timeout` binary on macOS).
 - **Budget-aware pacing.** Two budgets, two independent signals. The Claude-window signal is the
   `hooks/usage-warning.sh` hook (a required install): it reads `~/.claude/usage-snapshot.json` — a
   machine-readable snapshot written by `statusline-command.sh` on every status-line render using
@@ -111,7 +130,8 @@ by copying files (Setup below), or use the plugin from `framework-as-skill` inst
    [opencode CLI](https://opencode.ai) with an OpenCode Go subscription (run `/connect` inside
    opencode once so `~/.local/share/opencode/auth.json` holds your key), Python 3, and `jq`.
 2. Copy `CLAUDE.md` to `~/.claude/CLAUDE.md` (or append to yours).
-3. Copy `statusline-command.sh` to `~/.claude/statusline-command.sh` and wire it into Claude Code.
+3. Copy the workflow-tier skill: `cp -R skills/delegate-workflow ~/.claude/skills/`.
+4. Copy `statusline-command.sh` to `~/.claude/statusline-command.sh` and wire it into Claude Code.
    The easiest way is to run this inside Claude Code (it will update your `~/.claude/settings.json`):
 
    ```text
@@ -131,7 +151,7 @@ by copying files (Setup below), or use the plugin from `framework-as-skill` inst
 
    The script runs after each assistant message and writes `~/.claude/usage-snapshot.json`, which
    `CLAUDE.md` reads as the authoritative Claude-window budget signal.
-4. **Install the hooks — the usage warning is the Claude-window budget signal, not an add-on.**
+5. **Install the hooks — the usage warning is the Claude-window budget signal, not an add-on.**
    Copy `hooks/usage-warning.sh` and `hooks/announce-wakeup.sh` to `~/.claude/hooks/`, `chmod +x`
    both, then wire them into `~/.claude/settings.json`: `usage-warning.sh` on `PostToolUse` (fires
    every agentic turn, including autonomous `/loop` and `ScheduleWakeup` wakes) and `SessionStart`
@@ -170,11 +190,11 @@ by copying files (Setup below), or use the plugin from `framework-as-skill` inst
    calls). Test it before wiring (`CLAUDE_OVERRIDE_DIR` sets where override files live,
    `CLAUDE_CODE_SESSION_ID` sets the session id):
    `printf '{"hook_event_name":"PostToolUse","session_id":"s1"}' | CLAUDE_USAGE_SNAPSHOT=<fixture.json> CLAUDE_OVERRIDE_DIR=<dir> CLAUDE_CODE_SESSION_ID=s1 ~/.claude/hooks/usage-warning.sh`.
-5. Copy `scripts/opencode-go-usage.py` to `~/.claude/scripts/`.
-6. Merge the `agent.worker` block from `opencode.worker-agent.example.json` into your
+6. Copy `scripts/opencode-go-usage.py` to `~/.claude/scripts/`.
+7. Merge the `agent.worker` block from `opencode.worker-agent.example.json` into your
    `~/.config/opencode/opencode.json`. Without it, `opencode run` auto-rejects file edits and
    delegation silently fails.
-7. **Disable opencode's Claude Code compatibility.** OpenCode loads `~/.claude/CLAUDE.md` as a
+8. **Disable opencode's Claude Code compatibility.** OpenCode loads `~/.claude/CLAUDE.md` as a
    fallback instruction file by default. Because that file is written for Claude Code (the
    coordinator), letting opencode read it causes opencode sessions to inherit coordinator rules
    they should not execute, and breaks `opencode run` / direct opencode usage. Add this to your
@@ -188,7 +208,7 @@ by copying files (Setup below), or use the plugin from `framework-as-skill` inst
    There is no equivalent key in `opencode.json`; this is the only supported mechanism. If you
    want to keep `.claude/skills` available to opencode but only suppress the `CLAUDE.md` prompt
    fallback, use `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1` instead.
-8. Start a Claude Code session anywhere — the global `CLAUDE.md` applies to every project.
+9. Start a Claude Code session anywhere — the global `CLAUDE.md` applies to every project.
 
 ## Caveats
 
