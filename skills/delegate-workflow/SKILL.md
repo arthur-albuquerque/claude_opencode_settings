@@ -1,6 +1,6 @@
 ---
 name: delegate-workflow
-description: Workflow-tier delegation — run a batch of 3+ independent opencode worker tasks through a deterministic ultracode Workflow (capped lanes, model-ladder retries, per-task QA, budget-resumable). Use when a delegation job decomposes into 3+ independent, non-overlapping coding tasks — migrations, test backfills, multi-module features, overnight runs. For 1–2 tasks, use direct delegation from the coordinator doctrine instead; this tier's wrapper overhead is pure surcharge there.
+description: Workflow-tier delegation — run a batch of 3+ independent opencode worker tasks through a deterministic ultracode Workflow (cost-weighted concurrency, model-ladder retries, per-task QA, budget-resumable). Use when a delegation job decomposes into 3+ independent, non-overlapping coding tasks — migrations, test backfills, multi-module features, overnight runs. For 1–2 tasks, use direct delegation from the coordinator doctrine instead; this tier's wrapper overhead is pure surcharge there.
 ---
 
 # delegate-workflow — Workflow tier for opencode delegation
@@ -48,7 +48,7 @@ export const meta = {
   name: 'delegate-workflow-run',
   description: 'Opencode workers implement tasks in isolated worktrees; ladder retries + per-task QA',
   phases: [
-    { title: 'Implement', detail: 'opencode workers code in worktrees, capped lanes' },
+    { title: 'Implement', detail: 'opencode workers code in worktrees, cost-weighted concurrency' },
     { title: 'QA', detail: 'diff-traceability review; high-risk: 2-lens adversarial' },
   ],
 }
@@ -59,7 +59,12 @@ const cfg = typeof args === 'string' ? JSON.parse(args) : args
 //   scratchDir: '/abs/session-scratchpad',                     // prompt files + worker logs live here
 //   gates: [{name:'test', cmd:'npm test'}, ...],
 //   ladder: ['deepseek-v4-flash','deepseek-v4-pro','kimi-k2.7-code','glm-5.2'],  // doctrine's escalation ladder
-//   lanes: 3,                                                  // hard cap: ≤3 concurrent opencode workers (Go budget rule)
+//   concurrency: {
+//     budget: 8,        // max sum of in-flight model weights — spend-RATE cap, not a worker count
+//     maxWorkers: 6,    // hard count cap for machine load (parallel gate runs); heavy test suites → 3-4
+//     weights: { 'deepseek-v4-flash':1, 'mimo-v2.5':1, 'deepseek-v4-pro':2, 'minimax-m3':2,
+//                'qwen3.7-plus':2, 'mimo-v2.5-pro':2, 'kimi-k2.7-code':3, 'glm-5.2':4 },
+//   },  // weights ≈ inverse of the model table's cost column: budget 8 ≈ 8 flash, ~3 kimi, or 2 glm at once
 //   tasks: [{id, description, files:[], model, risk, acceptance, prompt, long}],
 // }
 
@@ -94,6 +99,7 @@ const launchBlock = (t, model, promptFile, sessionId) => {
 
 const implPrompt = (t, model, attempt, feedback, sessionId) => `You are a THIN WRAPPER around an opencode CLI worker. You never write or fix feature code — your only writes are the prompt file and the housekeeping named below. Repo: ${cfg.repo} · Task: ${t.id} — ${t.description} · Attempt ${attempt} · Worker model: ${model}
 
+0. Budget probe (free): python3 ~/.claude/scripts/opencode-go-usage.py — exit 2 means the gateway is blocked: return status "blocked" with the probe's window + reset_in_sec in summary and skip every later step.
 1. Worktree: if ${wt(t)} does not exist: cd ${cfg.repo} && git worktree add ${wt(t)} -b ${br(t)} ${cfg.baseBranch} (branch exists from a prior attempt → git worktree add ${wt(t)} ${br(t)}). If it exists, use as-is.
 2. Write this VERBATIM to ${cfg.scratchDir}/dw-${t.id}-prompt.md:
 ---PROMPT START---
@@ -116,6 +122,22 @@ const lensPrompt = (lens, t, impl) => `ADVERSARIAL REVIEW — try to REFUTE via 
 const LENSES = ['correctness (logic errors, unmet acceptance, broken edge cases)', 'regression (existing behavior — run the existing suite)']
 
 let blocked = false, blockInfo = ''
+
+// Cost-weighted concurrency: parallelism is metered in Go-spend-rate units, not worker count.
+// Cheap models fan wide, expensive models stay narrow, and ladder escalation onto a pricier
+// model automatically narrows the fan. QA agents run OUTSIDE this semaphore — they cost
+// Claude tokens, not Go tokens, so reviews of one task overlap implementation of the next.
+let usedWeight = 0, inFlight = 0
+const waiters = []
+const weightOf = m => cfg.concurrency.weights[m] ?? 2
+async function acquire(w) {
+  while (!blocked && (usedWeight + w > cfg.concurrency.budget || inFlight >= cfg.concurrency.maxWorkers))
+    await new Promise(r => waiters.push(r))
+  if (blocked) return false
+  usedWeight += w; inFlight += 1; return true
+}
+function release(w) { usedWeight -= w; inFlight -= 1; waiters.splice(0).forEach(r => r()) }
+
 async function implement(t, model, attempt, feedback, sessionId) {
   return agent(implPrompt(t, model, attempt, feedback, sessionId),
     { label:`impl:${t.id}:${model}#${attempt}`, phase:'Implement', schema: IMPL_SCHEMA, model: t.long ? 'sonnet' : 'haiku', effort:'low' })
@@ -139,9 +161,12 @@ async function runTask(t) {
   for (const model of ladderFrom(t.model)) {
     const tries = model === t.model ? 2 : 1          // 2 on the routed model, 1 per escalation step
     for (let n = 0; n < tries; n++) {
-      if (blocked) return { task: t.id, deferred: true, feedback }
       attempt++
-      const impl = await implement(t, model, attempt, feedback, model === lastModel ? sessionId : null)
+      const w = weightOf(model)
+      if (!(await acquire(w))) return { task: t.id, deferred: true, feedback }
+      let impl
+      try { impl = await implement(t, model, attempt, feedback, model === lastModel ? sessionId : null) }
+      finally { release(w) }
       lastModel = model
       if (!impl) { feedback = [...feedback, `attempt ${attempt} (${model}): wrapper agent died`]; continue }
       if (impl.session_id) sessionId = impl.session_id
@@ -160,23 +185,21 @@ async function runTask(t) {
   return { task: t.id, failed: true, feedback }
 }
 
-const queue = [...cfg.tasks], results = []
-await parallel(Array.from({ length: cfg.lanes }, () => async () => {
-  while (queue.length && !blocked) results.push(await runTask(queue.shift()))
-}))
+const results = (await parallel(cfg.tasks.map(t => () => runTask(t)))).filter(Boolean)
 return {
   approved: results.filter(r => r.impl),
   failed:   results.filter(r => r.failed).map(r => ({ task: r.task, feedback: r.feedback })),
-  deferred: [...results.filter(r => r.deferred).map(r => r.task), ...queue.map(t => t.id)],
+  deferred: results.filter(r => r.deferred).map(r => r.task),
   blocked, blockInfo,
 }
 ```
 
 Notes on the template:
-- The lanes loop IS the ≤3-worker cap — never raise `cfg.lanes` above 3, and never let `pipeline()`/`parallel()` fan tasks out directly (the Workflow's own concurrency cap is ~16 and would stampede the Go window).
+- **The semaphore is the worker cap, in spend-rate units, not worker count.** Rationale: parallelism doesn't change the *total* Go tokens a batch costs — only how fast they burn and how many workers are stranded mid-run if the gateway blocks. What the doctrine's old "≤3 workers" wave rule was really protecting was cost-rate (plus your review bandwidth, which this tier delegates), so the cap meters exactly that: each in-flight worker holds its model's weight (≈ inverse of the table's cost column) against `budget`. Eight flash workers burn roughly like two glm workers, so both are legal; escalation retries automatically narrow the fan as the ladder climbs. Per-launch probes (wrapper step 0, free) plus the freeze-on-block rule bound the stranded-work blast radius to workers already in flight.
+- **Tuning:** `budget: 8` is the default spend-rate ceiling — raise it only deliberately for a nearly-all-flash batch, lower it near the end of a Go window. `maxWorkers` protects the machine, not the budget: parallel gate runs (full test suites) are CPU-bound, so drop it to 3–4 when gates are heavy. Never bypass the semaphore by fanning `agent()` calls directly — the Workflow's own concurrency cap (~16) would stampede the Go window.
 - Same-model retries reuse the opencode session (`-s`) so feedback attempts don't resend full context; escalation to a new model starts a fresh session with the accumulated feedback embedded in the prompt file.
 - Worktrees are managed manually (deterministic path per task, shared across attempts) rather than via `isolation:'worktree'`, because retries and `-s` session reuse need attempt N+1 to see attempt N's tree.
-- A `blocked` wrapper freezes all lanes: remaining tasks return as `deferred`, never silently dropped.
+- A `blocked` wrapper freezes all launches: waiting tasks return as `deferred`, never silently dropped.
 
 ## Phase 2 — after the Workflow returns (inline, you)
 

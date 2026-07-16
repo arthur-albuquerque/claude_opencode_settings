@@ -23,7 +23,8 @@ This is the `global-workflow` branch: the `global` architecture — the **entire
 the global `~/.claude/CLAUDE.md`, always in context, nothing to invoke — **plus a workflow tier**
 for multi-task jobs. A model-invocable skill, `skills/delegate-workflow/SKILL.md`, lets the
 coordinator route batches of **3+ independent, non-overlapping tasks** through a deterministic
-ultracode Workflow: ≤3 capped opencode worker lanes, the escalation ladder encoded as a retry loop,
+ultracode Workflow: cost-weighted worker concurrency (cheap models fan wide, expensive models stay
+narrow), the escalation ladder encoded as a retry loop,
 per-task QA by cheap Claude agents, and budget-interrupted runs that resume from cache
 (`resumeFromRunId`). The coordinator keeps decomposition and final review, and launches
 autonomously — installing the skill is your standing opt-in; the agent shows you the dispatched
@@ -62,7 +63,7 @@ this branch by copying files (Setup below), or use the plugin from `framework-as
 | File | Installs to | Purpose |
 |------|-------------|---------|
 | `CLAUDE.md` | `~/.claude/CLAUDE.md` | The whole system prompt: delegation rules, model table, budget pacing, auto-resume |
-| `skills/delegate-workflow/` | `~/.claude/skills/delegate-workflow/` | Workflow tier: orchestrates 3+ independent tasks through an ultracode Workflow (capped lanes, ladder retries, per-task QA, budget resume) |
+| `skills/delegate-workflow/` | `~/.claude/skills/delegate-workflow/` | Workflow tier: orchestrates 3+ independent tasks through an ultracode Workflow (cost-weighted concurrency, ladder retries, per-task QA, budget resume) |
 | `statusline-command.sh` | `~/.claude/statusline-command.sh` | Claude Code status line script that persists `~/.claude/usage-snapshot.json` |
 | `hooks/usage-warning.sh` | `~/.claude/hooks/usage-warning.sh` | Hook that auto-injects a budget warning into the agent's context at ≥90% / ≥95% of a Claude usage window |
 | `hooks/announce-wakeup.sh` | `~/.claude/hooks/announce-wakeup.sh` | Hook that fires after every `ScheduleWakeup` call and forces the agent to tell the user — in that turn's final message — that a wakeup is armed, when exactly it fires, why, and what happens on wake |
@@ -87,9 +88,11 @@ this branch by copying files (Setup below), or use the plugin from `framework-as
 - **Workflow tier for multi-task jobs.** For 3+ independent, non-overlapping tasks, the
   model-invocable `delegate-workflow` skill hands orchestration to a deterministic ultracode
   Workflow: thin haiku-pinned wrapper agents launch the opencode workers in isolated git worktrees
-  (≤3 lanes, matching the Go-budget wave cap), the escalation ladder runs as a retry loop with
-  opencode session reuse (`-s`) on feedback attempts, cheap reviewer agents do first-pass QA, and a
-  mid-run budget block freezes the lanes and resumes later from cache (`resumeFromRunId`) instead
+  under a cost-weighted concurrency budget — each in-flight worker holds a weight inverse to its
+  model's cost, so cheap models fan wide (~8 flash) while expensive ones stay narrow (~2 glm) at
+  the same spend rate — the escalation ladder runs as a retry loop with opencode session reuse
+  (`-s`) on feedback attempts, cheap reviewer agents do first-pass QA, and a mid-run budget block
+  freezes all launches and resumes later from cache (`resumeFromRunId`) instead
   of losing completed work. The coordinator still decomposes up front and reviews/merges at the
   end, and invokes the tier autonomously whenever a job qualifies — installing the skill is the
   standing authorization; the dispatched task table is reported, not proposed. The skill's
