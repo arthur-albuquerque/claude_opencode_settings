@@ -3,12 +3,12 @@
   "owner": {
     "name": "Arthur Albuquerque"
   },
-  "description": "Claude Code × OpenCode Go coordinator/worker settings: budget-aware delegation, usage-limit warnings, and reset-timed auto-resume.",
+  "description": "Claude Code × OpenCode Go coordinator/worker settings: opt-in delegation of code-writing to cheap OpenCode Go workers.",
   "plugins": [
     {
       "name": "opencode-coordinator",
       "source": "./",
-      "description": "Budget-aware coordinator/worker framework: opt-in delegation of code-writing to cheap OpenCode Go workers, pushed Claude usage-limit warnings, and auto-resume timed to the exact limit-window reset."
+      "description": "Coordinator/worker framework: opt-in delegation of code-writing to cheap OpenCode Go workers, with a worker-budget probe and a non-negotiable QA loop."
     }
   ]
 }

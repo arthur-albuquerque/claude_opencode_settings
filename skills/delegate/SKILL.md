@@ -91,7 +91,7 @@ After every worker run:
 
 ## OpenCode Go worker budget (workers: $12/5h, $30/wk, $60/mo)
 
-This is the delegation-only budget. Your **Claude usage limit** is a separate, always-on concern handled by the Budget-aware pacing doctrine (injected by this plugin's SessionStart hook, or `~/.claude/CLAUDE.md` on manual installs) — never use one to reason about the other.
+This budget applies only when you delegate.
 
 **The signal.** `opencode-go-usage.py` (on `PATH` from this plugin's `bin/`; manual installs: `python3 ~/.claude/scripts/opencode-go-usage.py`). The `gateway` probe is authoritative and the only budget signal (exit 2 = blocked, with `window` + `reset_in_sec`; exit 0 = clear; probing is free). There is no proactive percent-used signal — run at full tier until the gateway blocks. Details in the script's docstring.
 
@@ -100,9 +100,9 @@ Rules for every session that delegates:
 - Workers blocked (probe, or `GoUsageLimitError` in a worker's output — same signal): all Go models block together, downshifting won't help. If the 5h window tripped, wait for `reset_in_sec` or do the typing myself; if weekly/monthly tripped (resets days out), do the typing myself. Tell me either way.
 - Never silently drop remaining work over budget; report it with the triggering window + numbers.
 
-Extra rules for long autonomous jobs (multi-wave delegation, `/loop`, overnight runs):
+Extra rules for long jobs (multi-wave delegation, overnight runs):
 - Proactively run the worker probe between waves — don't wait for a failure signal.
-- Pausing on a worker block: collect in-flight workers, report the triggering window + numbers + remaining work, then enter the **Auto-resume loop of the Budget-aware pacing doctrine** (always in context — injected by this plugin or from `~/.claude/CLAUDE.md`) — but compute time-to-reset from the gateway probe's `reset_in_sec` instead of the snapshot. While work remains, never end a turn without a scheduled wakeup — an unscheduled pause means I have to restart you by hand, which defeats the point.
+- Pausing on a worker block: collect in-flight workers, then report the triggering window + numbers + remaining work so the user can decide whether to wait for the reset or have you do the typing yourself.
 
 ## Visualization default
 

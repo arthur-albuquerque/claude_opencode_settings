@@ -1,11 +1,11 @@
 {
   "name": "opencode-coordinator",
   "displayName": "OpenCode Coordinator",
-  "version": "0.1.0",
-  "description": "Budget-aware coordinator/worker framework: opt-in delegation of code-writing to cheap OpenCode Go workers, pushed Claude usage-limit warnings, and auto-resume timed to the exact limit-window reset.",
+  "version": "0.2.0",
+  "description": "Coordinator/worker framework: opt-in delegation of code-writing to cheap OpenCode Go workers, with a worker-budget probe and a non-negotiable QA loop.",
   "author": {
     "name": "Arthur Albuquerque"
   },
   "repository": "https://github.com/arthur-albuquerque/claude_opencode_settings",
-  "keywords": ["opencode", "delegation", "budget", "usage-limits", "auto-resume"]
+  "keywords": ["opencode", "delegation", "budget"]
 }
