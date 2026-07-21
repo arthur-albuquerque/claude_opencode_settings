@@ -18,8 +18,8 @@ token spend (writing code) happens on a flat-rate $12/5h worker plan instead of 
 
 This is the `global-workflow` branch: the `global` architecture — the **entire** framework lives in
 the global `~/.claude/CLAUDE.md`, always in context, nothing to invoke — **plus a workflow tier**
-for multi-task jobs. A model-invocable skill, `skills/delegate-workflow/SKILL.md`, lets the
-coordinator route batches of **3+ independent, non-overlapping tasks** through a deterministic
+for multi-task jobs. A model-invocable skill, `skills/delegate-workflow/SKILL.md`, requires the
+coordinator to route every batch of **3+ independent, non-overlapping tasks** through a deterministic
 ultracode Workflow: cost-weighted worker concurrency (cheap models fan wide, expensive models stay
 narrow), the escalation ladder encoded as a retry loop,
 per-task QA by cheap Claude agents, and budget-interrupted runs that resume from cache

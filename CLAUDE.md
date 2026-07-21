@@ -41,6 +41,8 @@ How to apply:
 
 ## Mechanics
 
+**Routing gate — run before launching any worker.** Count the independent, file-disjoint tasks in the job. **3+ tasks → you MUST invoke the `delegate-workflow` skill** — the batch runs through an ultracode Workflow while you keep decomposition and final review; launching direct Bash workers for a 3+ task job is a doctrine violation. **1–2 tasks → delegate directly** as below. If the queue of pending delegation tasks grows to 3+ mid-session, stop launching direct workers and route the remainder through the skill.
+
 Workers run via Bash in the project directory. Write the full delegation prompt to a file in `/tmp`, then launch with a one-line pointer prompt:
 
 ```bash
@@ -54,7 +56,6 @@ opencode run --pure --agent worker -m opencode-go/<model> "Read the file /tmp/<t
 - Launch **every** worker with `run_in_background: true` and **no `timeout`** — worker runs take minutes and foreground Bash caps at 10 min, which kills a run mid-edit. The harness notifies you when each run exits; review each result as it lands. If a worker looks hung, inspect and kill it deliberately — never rely on a timer to reap it. Don't run two workers over overlapping files.
 - **Iterating on a worker's output:** don't re-send full context. Capture the session at launch with `--format json` (first event has `sessionID`), or for a single sequential worker just use `-c` (continue latest session). Then: `opencode run --pure --agent worker -s <sessionID> "Review failed because X. Fix by Y."`
 - `--variant high|max` raises reasoning effort on models that support it (e.g. kimi-k2.7-code) — use for the hard tier only.
-- Jobs of **3+ independent, non-overlapping tasks**: invoke the `delegate-workflow` skill — the batch runs through an ultracode Workflow while you keep decomposition and final review. For 1–2 tasks, delegate directly as above.
 - Claude-side subagents (Explore, etc.) are fine for codebase search that feeds your own reasoning; anything that *writes code* goes to opencode.
 
 ## Delegation prompt contract
@@ -92,7 +93,7 @@ This budget applies only when you delegate.
 **The signal.** `python3 ~/.claude/scripts/opencode-go-usage.py`. The `gateway` probe is authoritative and the only budget signal (exit 2 = blocked, with `window` + `reset_in_sec`; exit 0 = clear; probing is free). There is no proactive percent-used signal — run at full tier until the gateway blocks. Details in the script's docstring.
 
 Rules for every session that delegates:
-- A direct-delegation wave = ≤3 parallel opencode workers on non-overlapping files — never Claude subagents. (Inside the `delegate-workflow` skill this count cap is replaced by the skill's per-tier concurrency caps.)
+- A direct-delegation wave = ≤2 parallel opencode workers on non-overlapping files — never Claude subagents. Three or more workers means the job was 3+ tasks and belonged in the `delegate-workflow` skill, where this count cap is replaced by the skill's per-tier concurrency caps.
 - Workers blocked (probe, or `GoUsageLimitError` in a worker's output — same signal): all Go models block together, downshifting won't help. If the 5h window tripped, wait for `reset_in_sec` or do the typing myself; if weekly/monthly tripped (resets days out), do the typing myself. Tell me either way.
 - Never silently drop remaining work over budget; report it with the triggering window + numbers.
 - On long multi-wave jobs, proactively run the probe between waves — don't wait for a failure signal.
