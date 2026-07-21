@@ -44,12 +44,6 @@ if [ -n "$week_pct" ] && [ -n "$week_resets" ]; then
   week_str=$(printf "Weekly: \033[1;38;2;217;119;87m%.0f%% used\033[0m · resets %s %s" "$week_pct" "$reset_day" "$reset_time")
 fi
 
-# --- Persist a machine-readable usage snapshot so budget-aware agents can read the real limit %s ---
-snap="${HOME}/.claude/usage-snapshot.json"
-printf '{"captured_at":%s,"context_pct":%s,"five_hour":{"used_percentage":%s,"resets_at":%s},"seven_day":{"used_percentage":%s,"resets_at":%s}}\n' \
-  "$(date +%s)" "${pct:-null}" "${five_pct:-null}" "${five_resets:-null}" "${week_pct:-null}" "${week_resets:-null}" \
-  > "${snap}.tmp" 2>/dev/null && mv -f "${snap}.tmp" "$snap" 2>/dev/null
-
 # --- Assemble output ---
 out="$ctx"
 if [ -n "$five_str" ]; then

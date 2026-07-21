@@ -1,12 +1,9 @@
 # Claude Code × OpenCode Go — coordinator/worker settings
 
-> In short, this setup turns Claude Code into a budget-aware coordinator that delegates coding work
-> to cheap OpenCode Go workers, verifies every worker result before shipping it, and monitors live
-> usage across both services so it pauses before a budget window is exhausted and automatically
-> resumes once it resets.
+> In short, this setup turns Claude Code into a coordinator that delegates coding work to cheap
+> OpenCode Go workers and verifies every worker result before shipping it.
 >
-> The main goal is to let Claude run long coding sessions by itself with as little human
-> intervention as possible.
+> The main goal is to spend expensive Claude tokens on judgment and cheap Go tokens on typing.
 
 Global Claude Code configuration for people who run **Claude Code** (Fable 5 / Opus) alongside an
 **[OpenCode Go](https://opencode.ai)** subscription. It turns Claude into a *coordinator* that spends
@@ -22,14 +19,13 @@ token spend (writing code) happens on a flat-rate $12/5h worker plan instead of 
 This is the `global` branch, where the **entire** framework lives in the global `~/.claude/CLAUDE.md`.
 Every Claude session — even one where you never intend to delegate — loads the whole system prompt:
 the coordinator/worker rules, the model table, the delegation contract, the QA loop, *and* the
-budget pacing. It's one file, always in context, nothing to invoke.
+worker budget. It's one file, always in context, nothing to invoke.
 
 The [`framework-as-skill`](https://github.com/arthur-albuquerque/claude_opencode_settings/tree/framework-as-skill)
 branch **splits the framework by scope** so nothing is forced on a session that doesn't need it:
 
 | Concern | `global` (this branch) | `framework-as-skill` |
 |---------|----------------------|----------------------|
-| **Claude-usage-limit pacing** — dead-man's switch, auto-resume loop | In `CLAUDE.md` | In `CLAUDE.md` — stays always-on either way |
 | **Coordinator/worker delegation** — the split, model table, prompt contract, QA loop, OpenCode worker budget, viz default | In `CLAUDE.md` — always loaded | Moved to `skills/delegate/SKILL.md`, a **user-invoked skill** (`disable-model-invocation: true`) loaded only when you type `delegate` |
 
 Pick this branch if you want the simplest install (one `CLAUDE.md`, no skill to copy, no plugin
@@ -45,18 +41,16 @@ the repo's **default branch**, so the plugin installs directly from GitHub:
 /plugin install opencode-coordinator@claude-opencode-settings
 ```
 
-This `global` branch deliberately stays plugin-free — a second plugin carrying the same hooks and
-doctrine would double-inject warnings and context if both were ever enabled. Install this branch
-by copying files (Setup below), or use the plugin from `framework-as-skill` instead.
+This `global` branch deliberately stays plugin-free — a second plugin carrying the same doctrine
+would double-inject context if both were ever enabled. Install this branch by copying files
+(Setup below), or use the plugin from `framework-as-skill` instead.
 
 ## What's in here
 
 | File | Installs to | Purpose |
 |------|-------------|---------|
-| `CLAUDE.md` | `~/.claude/CLAUDE.md` | The whole system prompt: delegation rules, model table, budget pacing, auto-resume |
-| `statusline-command.sh` | `~/.claude/statusline-command.sh` | Claude Code status line script that persists `~/.claude/usage-snapshot.json` |
-| `hooks/usage-warning.sh` | `~/.claude/hooks/usage-warning.sh` | Hook that auto-injects a budget warning into the agent's context at ≥90% / ≥95% of a Claude usage window |
-| `hooks/announce-wakeup.sh` | `~/.claude/hooks/announce-wakeup.sh` | Hook that fires after every `ScheduleWakeup` call and forces the agent to tell the user — in that turn's final message — that a wakeup is armed, when exactly it fires, why, and what happens on wake |
+| `CLAUDE.md` | `~/.claude/CLAUDE.md` | The whole system prompt: delegation rules, model table, worker budget |
+| `statusline-command.sh` | `~/.claude/statusline-command.sh` | Optional status line script showing context-window tokens and 5-hour/weekly usage percentages |
 | `scripts/opencode-go-usage.py` | `~/.claude/scripts/opencode-go-usage.py` | OpenCode Go budget check (authoritative gateway blocked-state probe) |
 | `opencode.worker-agent.example.json` | merge into `~/.config/opencode/opencode.json` | The `worker` agent definition that lets `opencode run` edit files non-interactively |
 
@@ -75,44 +69,21 @@ by copying files (Setup below), or use the plugin from `framework-as-skill` inst
 - **Non-negotiable QA loop.** After every worker run: read the actual `git diff`, re-run the
   verification command yourself, re-delegate up the ladder or fix residuals directly. The
   coordinator owns commits and everything user-visible.
-- **Budget-aware pacing.** Two budgets, two independent signals. The Claude-window signal is the
-  `hooks/usage-warning.sh` hook (a required install): it reads `~/.claude/usage-snapshot.json` — a
-  machine-readable snapshot written by `statusline-command.sh` on every status-line render using
-  the harness's own accounting — and *pushes* the warning straight into the agent's context every
-  tool-using turn once a window crosses 90% (heads-up) / 95% (stop directive). The agent never
-  polls; the warning comes to it, so the pause no longer depends on the agent remembering to
-  check. The stop is a default, not a hard wall: on an explicit user request to continue
-  regardless of usage, the agent writes the tripped window's reset epoch to a **per-session** flag
-  `~/.claude/usage-override-<session_id>` and the hook downgrades the stop to a one-line reminder
-  for **that session only** — other sessions stay stopped even though the account-wide limit trips
-  them all at once. The agent removes the flag when the authorized task finishes; the hook also
-  self-deletes it once its epoch passes, restoring the default. A proactively-armed dead-man's-switch `ScheduleWakeup` backstops the one case the hook
-  can't catch — a hard trip mid-turn on a lagging snapshot. Every `ScheduleWakeup` is also
-  announced: `hooks/announce-wakeup.sh` fires after the call and injects a directive (with the
-  computed wall-clock fire time) forcing the agent to tell the user that a wakeup is armed, when
-  exactly it fires, why, and the on-wake plan — so a paused session never looks dead. The worker
-  plan is checked with `opencode-go-usage.py`, which probes the Go gateway with a 1-token request
-  (blocked requests are rejected before billing, so probing is free) and reports blocked-state +
-  reset time authoritatively — the only budget signal (there is no key-based percent-used API, so
-  the doctrine runs at full tier until the gateway blocks). Rules cover wave sizing and never
-  silently dropping work.
-- **Auto-resume loop.** When a long autonomous job pauses near a usage limit, the session
-  schedules its own wakeups timed to the tripped window's exact reset time (`resets_at` from the
-  snapshot, +60s pad — chained hourly only when the reset is more than 1h out), re-checks both
-  budgets on each wake with a minimal two-command turn, and resumes the remaining plan the moment
-  a window clears — no human restart needed, and no useful time lost to fixed-interval polling.
-- **Built for Claude's auto mode.** The coordinator/worker split, built-in verification, and
-  auto-resume loop are designed so Claude can drive long coding sessions with minimal human input;
-  auto mode is the ideal way to use this setup.
+- **Worker-budget awareness.** The worker plan is checked with `opencode-go-usage.py`, which
+  probes the Go gateway with a 1-token request (blocked requests are rejected before billing, so
+  probing is free) and reports blocked-state + reset time authoritatively — the only budget signal
+  (there is no key-based percent-used API, so the doctrine runs at full tier until the gateway
+  blocks). Rules cover wave sizing and never silently dropping work.
 
 ## Setup
 
 1. **Prerequisites:** [Claude Code](https://claude.com/claude-code), the
    [opencode CLI](https://opencode.ai) with an OpenCode Go subscription (run `/connect` inside
-   opencode once so `~/.local/share/opencode/auth.json` holds your key), Python 3, and `jq`.
+   opencode once so `~/.local/share/opencode/auth.json` holds your key), and Python 3.
 2. Copy `CLAUDE.md` to `~/.claude/CLAUDE.md` (or append to yours).
-3. Copy `statusline-command.sh` to `~/.claude/statusline-command.sh` and wire it into Claude Code.
-   The easiest way is to run this inside Claude Code (it will update your `~/.claude/settings.json`):
+3. *(Optional)* Copy `statusline-command.sh` to `~/.claude/statusline-command.sh` and wire it into
+   Claude Code. The easiest way is to run this inside Claude Code (it will update your
+   `~/.claude/settings.json`):
 
    ```text
    /statusline use the existing executable script at ~/.claude/statusline-command.sh as the status-line command; it reads JSON from stdin and prints the context-window token count, 5-hour usage percentage with time remaining, and weekly usage percentage with reset time
@@ -129,52 +100,11 @@ by copying files (Setup below), or use the plugin from `framework-as-skill` inst
    }
    ```
 
-   The script runs after each assistant message and writes `~/.claude/usage-snapshot.json`, which
-   `CLAUDE.md` reads as the authoritative Claude-window budget signal.
-4. **Install the hooks — the usage warning is the Claude-window budget signal, not an add-on.**
-   Copy `hooks/usage-warning.sh` and `hooks/announce-wakeup.sh` to `~/.claude/hooks/`, `chmod +x`
-   both, then wire them into `~/.claude/settings.json`: `usage-warning.sh` on `PostToolUse` (fires
-   every agentic turn, including autonomous `/loop` and `ScheduleWakeup` wakes) and `SessionStart`
-   (fires on resume); `announce-wakeup.sh` on `PostToolUse` with matcher `ScheduleWakeup` (fires
-   right after the agent arms/refreshes/stops a wakeup and forces it to announce the fire time and
-   reason to you). If those events already have hooks, **append** these entries to their `hooks`
-   array rather than replacing it:
-
-   ```json
-   {
-     "hooks": {
-       "PostToolUse": [
-         { "matcher": "*", "hooks": [
-           { "type": "command", "command": "~/.claude/hooks/usage-warning.sh", "timeout": 5 }
-         ]},
-         { "matcher": "ScheduleWakeup", "hooks": [
-           { "type": "command", "command": "~/.claude/hooks/announce-wakeup.sh", "timeout": 5 }
-         ]}
-       ],
-       "SessionStart": [
-         { "matcher": "*", "hooks": [
-           { "type": "command", "command": "~/.claude/hooks/usage-warning.sh", "timeout": 5 }
-         ]}
-       ]
-     }
-   }
-   ```
-
-   The hook is silent below 90%; at ≥90% it injects a heads-up and at ≥95% a stop directive that
-   quotes the pause procedure. If the firing session's `~/.claude/usage-override-<session_id>` holds
-   a future unix epoch (written by the agent only on an explicit user request to continue past the
-   limit — see CLAUDE.md "User override"), that session's stop is downgraded to a one-line reminder
-   and its heads-up is suppressed; other sessions are unaffected. A suffix-less
-   `~/.claude/usage-override` is honored as a deliberate all-sessions switch. The hook deletes any
-   override file once its epoch passes. It reads only the snapshot and the override file (no API
-   calls). Test it before wiring (`CLAUDE_OVERRIDE_DIR` sets where override files live,
-   `CLAUDE_CODE_SESSION_ID` sets the session id):
-   `printf '{"hook_event_name":"PostToolUse","session_id":"s1"}' | CLAUDE_USAGE_SNAPSHOT=<fixture.json> CLAUDE_OVERRIDE_DIR=<dir> CLAUDE_CODE_SESSION_ID=s1 ~/.claude/hooks/usage-warning.sh`.
-5. Copy `scripts/opencode-go-usage.py` to `~/.claude/scripts/`.
-6. Merge the `agent.worker` block from `opencode.worker-agent.example.json` into your
+4. Copy `scripts/opencode-go-usage.py` to `~/.claude/scripts/`.
+5. Merge the `agent.worker` block from `opencode.worker-agent.example.json` into your
    `~/.config/opencode/opencode.json`. Without it, `opencode run` auto-rejects file edits and
    delegation silently fails.
-7. **Disable opencode's Claude Code compatibility.** OpenCode loads `~/.claude/CLAUDE.md` as a
+6. **Disable opencode's Claude Code compatibility.** OpenCode loads `~/.claude/CLAUDE.md` as a
    fallback instruction file by default. Because that file is written for Claude Code (the
    coordinator), letting opencode read it causes opencode sessions to inherit coordinator rules
    they should not execute, and breaks `opencode run` / direct opencode usage. Add this to your
@@ -188,7 +118,7 @@ by copying files (Setup below), or use the plugin from `framework-as-skill` inst
    There is no equivalent key in `opencode.json`; this is the only supported mechanism. If you
    want to keep `.claude/skills` available to opencode but only suppress the `CLAUDE.md` prompt
    fallback, use `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1` instead.
-8. Start a Claude Code session anywhere — the global `CLAUDE.md` applies to every project.
+7. Start a Claude Code session anywhere — the global `CLAUDE.md` applies to every project.
 
 ## Caveats
 
@@ -196,11 +126,5 @@ by copying files (Setup below), or use the plugin from `framework-as-skill` inst
   **July 2026**; re-rank when the catalog changes.
 - Budget figures assume the $12/5h ($30/wk, $60/mo) Go plan — adjust the numbers in `CLAUDE.md`
   and the script's docstring if yours differs.
-- The auto-resume loop only works while the Claude Code session stays open on an awake machine
-  (`caffeinate -is` for overnight runs on macOS).
-- The Claude-window signal is `usage-warning.sh` pushing the warning into context; it reads
-  `usage-snapshot.json`, which `statusline-command.sh` writes only when the status line renders and
-  the hook only fires on tool-using turns, so a single big turn can hard-trip before any warning —
-  the dead-man's-switch `ScheduleWakeup` is the backstop for that. `opencode-go-usage.py` reports
-  only the authoritative gateway blocked-state (there is no key-based percent-used API for OpenCode
-  Go); it is the sole worker-budget signal.
+- `opencode-go-usage.py` reports only the authoritative gateway blocked-state (there is no
+  key-based percent-used API for OpenCode Go); it is the sole worker-budget signal.
